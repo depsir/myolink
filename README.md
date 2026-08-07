@@ -6,16 +6,16 @@ di ritardi o pacchetti perduti. Sotto al grafico, lo **spettrogramma del
 microfono** sullo stesso asse dei tempi.
 
 ```
-firmware/myoware_serial/   sketch USB seriale (pacchetti binari framati COBS, o CSV)
-firmware/myoware_ble/      sketch BLE (Nordic UART Service)
-firmware/*/myolink.h       campionamento + formato pacchetto — i due file sono IDENTICI
-app/index.html             ricevitore web: grafico live, spettrogramma, statistiche del link
+firmware/myoware/myoware.ino   sketch unico: seriale + BLE, sceglie da solo (vedi sotto)
+firmware/myoware/myolink.h     campionamento + formato pacchetto
+app/index.html                 ricevitore web: grafico live, spettrogramma, statistiche del link
 ```
 
 ## Avvio rapido
 
-**Firmware.** Apri lo sketch nell'IDE Arduino, board *Arduino Nano ESP32*, carica.
-Tutto ciò che si tocca sta in cima al `.ino`:
+**Firmware.** Apri `firmware/myoware` nell'IDE Arduino, board *Arduino Nano
+ESP32*, carica. Non devi scegliere il trasporto: lo sketch parla con quello che
+colleghi. Tutto ciò che si tocca sta in cima al `.ino`:
 
 | define | default | cosa fa |
 |---|---|---|
@@ -23,6 +23,9 @@ Tutto ciò che si tocca sta in cima al `.ino`:
 | `MYO_PERIOD_US` | `50000` | periodo di campionamento, 50 ms = 20 Hz |
 | `MYO_SIMULATE` | **`1`** | `1` = linea finta invece dell'ADC, `0` = sensore reale |
 | `MYO_SIM_MAX` | `1000` | fondo scala del segnale simulato |
+| `MYO_ENABLE_SERIAL` | `1` | compila il trasporto seriale |
+| `MYO_ENABLE_BLE` | `1` | compila il trasporto BLE (costa 20% di flash e 8% di RAM) |
+| `MYO_TEXT_MODE` | `0` | solo seriale: `1` = CSV `t_us,valore` invece del binario |
 
 `MYO_SIMULATE` è a **1** di default, così puoi provare tutta la catena senza
 avere il sensore attaccato: genera un random walk con inerzia in 0..1000, cioè
@@ -52,6 +55,42 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 
 **Microfono.** Il pulsante *Microfono* apre lo spettrogramma. È un flusso
 indipendente: funziona anche senza board collegata, e viceversa.
+
+## Seriale o BLE: lo decide lo sketch
+
+Niente jumper e niente riflash: `firmware/myoware` tiene su entrambi i trasporti
+e manda i dati a quello che colleghi, **cambiando anche a caldo**.
+
+Un solo trasporto per volta possiede la "linea" — il ring buffer ha un solo
+consumatore, e duplicare lo stream non serve a nessuno. La regola è **vince
+l'ultimo arrivato**: sul fronte di salita di un trasporto la linea passa a lui;
+quando il proprietario cade, torna all'altro se è ancora su. Attacchi una cosa e
+quella parla, la stacchi e l'altra riprende. A ogni cambio la base dei tempi
+riparte da zero e la coda viene buttata, così il ricevente non si trova campioni
+raccolti per qualcun altro.
+
+Il perno è che **`(bool)Serial` significa davvero "un programma ha aperto la
+porta"**: su questa board `Serial` è la USB CDC di TinyUSB, e il flag `connected`
+del core segue DTR+RTS (`USBCDC.cpp`, `if (dtr && rts && !connected)`).
+Attaccare la board a un caricatore, a un hub o a un PC che non apre nulla non lo
+alza. Su un `Serial` che è UART hardware `operator bool()` è invece sempre vero e
+il meccanismo non reggerebbe: c'è un `#error` che ferma la compilazione se
+`ARDUINO_USB_CDC_ON_BOOT`/`ARDUINO_USB_MODE` non sono quelli giusti, invece di
+lasciarti un firmware che non trasmette mai in BLE.
+
+Effetto collaterale comodo: quando la linea è BLE (o non c'è) la seriale è
+libera e ci finisce la diagnostica — `linea: BLE`, `linea: seriale`, i comandi
+riconosciuti. Aprire il monitor seriale mentre il BLE trasmette **non** gli ruba
+la linea, perché ruba solo chi *arriva*, e il BLE era già lì. Quando invece la
+linea è la seriale la diagnostica tace, perché lì passano byte binari.
+
+I comandi (`R`, `P<us>`) sono accettati solo dal trasporto che possiede la linea;
+dall'altro vengono scartati, così nessuno riazzera la base dei tempi sotto i
+piedi di chi sta registrando.
+
+Mettere `MYO_ENABLE_SERIAL` o `MYO_ENABLE_BLE` a `0` compila via l'altro
+trasporto e riporta lo sketch alla dimensione di un firmware dedicato — è la
+via se ti serve solo la seriale e vuoi indietro i 20% di flash del BLE.
 
 ## Lo spettrogramma
 
@@ -204,14 +243,19 @@ mandare il timestamp.
 
 ## Stato
 
-Fatto: firmware seriale + BLE, protocollo, grafico live, spettrogramma e
-strumentazione.
+Fatto: firmware unico seriale + BLE con scelta automatica del trasporto,
+protocollo, grafico live, spettrogramma e strumentazione.
 
 Verificato:
 
-- Entrambi gli sketch compilano per `arduino:esp32:nano_nora` (core
-  **2.0.18-arduino.5**) senza alcun warning, anche con `--warnings all`.
-  Occupazione: seriale 9% flash / 12% RAM, BLE 29% / 19%.
+- Lo sketch compila per `arduino:esp32:nano_nora` (core **2.0.18-arduino.5**)
+  senza alcun warning, anche con `--warnings all`, in tutte e cinque le
+  combinazioni di `MYO_ENABLE_SERIAL` / `MYO_ENABLE_BLE` / `MYO_TEXT_MODE` che
+  hanno senso. Tenere su entrambi i trasporti non costa nulla rispetto ai due
+  firmware dedicati di prima: 29% flash / 19% RAM con entrambi, 9% / 11% con il
+  solo seriale.
+- La guardia `#error` scatta davvero, provata forzando sia
+  `ARDUINO_USB_CDC_ON_BOOT=0` sia `ARDUINO_USB_MODE=1`.
 - CRC-16/CCITT-FALSE: `0x29B1` sul vettore di riferimento `"123456789"`, in C e in JS.
 - COBS: 4000 vettori casuali prodotti dall'encoder C e riletti dal decoder JS
   dell'app, 0 fallimenti — inclusi run senza zeri più lunghi di 254 byte e
@@ -242,8 +286,8 @@ Per compilare senza aprire l'IDE (l'`arduino-cli` è dentro l'app):
 
 ```sh
 CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli"
-"$CLI" compile -b arduino:esp32:nano_nora firmware/myoware_ble
-"$CLI" upload  -b arduino:esp32:nano_nora -p /dev/cu.usbmodemXXXX firmware/myoware_ble
+"$CLI" compile -b arduino:esp32:nano_nora firmware/myoware
+"$CLI" upload  -b arduino:esp32:nano_nora -p /dev/cu.usbmodemXXXX firmware/myoware
 ```
 
 ## Prossimi passi

@@ -1,8 +1,7 @@
 // myolink.h — campionamento a cadenza fissa + formato pacchetto MyoLink.
 //
-// Questo file è IDENTICO in myoware_serial/ e myoware_ble/ (l'IDE Arduino
-// vuole gli header dentro la cartella dello sketch). Se lo modifichi,
-// copialo nell'altra cartella.
+// Sta nella cartella dello sketch perché è lì che l'IDE Arduino cerca gli
+// header.
 //
 // Idea di fondo:
 //   - un esp_timer periodico legge l'ADC e mette (timestamp, valore) in un

@@ -2,13 +2,13 @@
 
 MyoWare → Arduino Nano ESP32 → grafico live, via **seriale** o **BLE**, con
 timestamp a cadenza esatta per poter ricostruire il segnale anche in presenza
-di ritardi o pacchetti perduti. Sotto al grafico, lo **spettrogramma del
-microfono** sullo stesso asse dei tempi.
+di ritardi o pacchetti perduti. Sotto al grafico, la **nota cantata** e lo
+**spettrogramma del microfono**, sullo stesso asse dei tempi.
 
 ```
 firmware/myoware/myoware.ino   sketch unico: seriale + BLE, sceglie da solo (vedi sotto)
 firmware/myoware/myolink.h     campionamento + formato pacchetto
-app/index.html                 ricevitore web: grafico live, spettrogramma, statistiche del link
+app/index.html                 ricevitore web: grafico live, pitch, spettrogramma, statistiche del link
 ```
 
 ## Avvio rapido
@@ -21,17 +21,17 @@ colleghi. Tutto ciò che si tocca sta in cima al `.ino`:
 |---|---|---|
 | `MYO_PIN` | `A0` | ingresso analogico (uscita ENV del MyoWare) |
 | `MYO_PERIOD_US` | `50000` | periodo di campionamento, 50 ms = 20 Hz |
-| `MYO_SIMULATE` | **`1`** | `1` = linea finta invece dell'ADC, `0` = sensore reale |
+| `MYO_SIMULATE` | `0` | `1` = linea finta invece dell'ADC, `0` = sensore reale |
 | `MYO_SIM_MAX` | `1000` | fondo scala del segnale simulato |
 | `MYO_ENABLE_SERIAL` | `1` | compila il trasporto seriale |
 | `MYO_ENABLE_BLE` | `1` | compila il trasporto BLE (costa 20% di flash e 8% di RAM) |
 | `MYO_TEXT_MODE` | `0` | solo seriale: `1` = CSV `t_us,valore` invece del binario |
 
-`MYO_SIMULATE` è a **1** di default, così puoi provare tutta la catena senza
-avere il sensore attaccato: genera un random walk con inerzia in 0..1000, cioè
-una linea continua che vaga (~2.7 count per campione, non rumore), che rimbalza
-sui bordi invece di saturare — così un clipping vero non si confonde col
-simulatore. **Mettilo a 0 quando colleghi il MyoWare.**
+`MYO_SIMULATE` è a **0**: legge il MyoWare vero. **Mettilo a 1 per provare tutta
+la catena senza sensore attaccato** — genera un random walk con inerzia in
+0..1000, cioè una linea continua che vaga (~2.7 count per campione, non rumore),
+che rimbalza sui bordi invece di saturare, così un clipping vero non si confonde
+col simulatore.
 
 **App.** Web Serial e Web Bluetooth richiedono un contesto sicuro: **non
 funzionano da `file://`**.
@@ -53,8 +53,13 @@ a provare la UI senza nemmeno la board.
 Il campo `Hz` + *Applica* cambia la frequenza di campionamento a caldo, senza
 riflashare — comodo per cercare il punto di rottura del BLE.
 
-**Microfono.** Il pulsante *Microfono* apre lo spettrogramma. È un flusso
-indipendente: funziona anche senza board collegata, e viceversa.
+**Microfono.** Il pulsante *Microfono* apre i due pannelli audio, pitch e
+spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
+viceversa.
+
+**I pannelli.** Ognuno ha una barra con il nome, i suoi controlli e una freccia
+che lo **comprime**; il bordo inferiore si trascina per **ridimensionarlo**. La
+larghezza no: è quella che tiene allineati gli assi dei tempi.
 
 ## Seriale o BLE: lo decide lo sketch
 
@@ -92,11 +97,63 @@ Mettere `MYO_ENABLE_SERIAL` o `MYO_ENABLE_BLE` a `0` compila via l'altro
 trasporto e riporta lo sketch alla dimensione di un firmware dedicato — è la
 via se ti serve solo la seriale e vuoi indietro i 20% di flash del BLE.
 
+## Il pitch
+
+Sta fra il grafico del sensore e lo spettrogramma, perché è quello che si
+confronta a occhio col sensore. Risponde alla domanda "quel disturbo è successo
+su una nota particolare?".
+
+L'asse Y è in **semitoni**, non in Hz: un semitono è un rapporto costante, quindi
+in questa scala un vibrato di mezzo tono è alto uguale a C3 e a C5. Lo sfondo è
+una tastiera — tasti neri come bande scure, i DO con la linea marcata — e i nomi
+delle note stanno su **entrambi** i margini, più una targhetta all'altezza della
+linea sul margine destro: dal vivo si guarda il bordo destro, perché è lì l'ora
+attuale. Il range si autoadatta ai dati visibili, oppure si fissa a mano con due
+nomi di nota (`C2`, `F#3`, `Bb4`).
+
+La stima è **YIN**: funzione differenza sul segnale nel tempo, normalizzazione
+cumulativa, prima discesa sotto soglia, interpolazione parabolica del minimo. Il
+picco dello spettro *non* andrebbe bene: sulla voce la fondamentale è spesso più
+debole della seconda o terza armonica, e si sbaglierebbe l'ottava di continuo.
+
+| controllo | cosa fa |
+|---|---|
+| `clarity ≥` | sotto questa soglia la linea si interrompe invece di inventare una nota |
+| `auto Y` | range verticale che insegue le note in vista; togliendolo si fissa con `da`/`a` |
+| `anche sullo spettrogramma` | ridisegna la stessa linea sopra lo spettrogramma |
+
+**La clarity è la cosa importante.** È `1 − CMND` al minimo scelto, cioè quanto
+il segnale è davvero periodico: la striscia colorata sotto la linea la mostra
+istante per istante. Su voce pulita sta sopra 0.95; sul silenzio, sulle
+consonanti e sul rumore crolla, e la linea si spezza — che è la risposta onesta.
+
+Due limiti da conoscere:
+
+- **YIN è monofonico.** Con una base musicale in cassa il microfono sente due
+  sorgenti armoniche e la stima si aggancia alla più forte, spesso il basso. Non
+  è aggirabile: **con le cuffie** il microfono prende solo la voce e torna
+  pulita. La clarity segnala il caso, non lo risolve.
+- **Ai cambi di nota la finestra da ~90 ms resta contaminata per qualche hop** e
+  può uscirne uno spurio d'ottava. Non c'è nessun filtro sul valore: una mediana
+  corta non toglierebbe una raffica di 4 campioni e rischierebbe di propagarne
+  uno sbagliato. Gli spuri restano quindi **visibili**; è l'auto-range a essere
+  robusto, perché usa i percentili al 2% invece di minimo e massimo, così un
+  singolo salto non schiaccia la scala. Chi esce dal quadro va a sbattere sul
+  bordo, e lo si vede.
+
+Sotto il cofano: `AnalyserNode` dedicato con finestra **fissa** a 4096 campioni
+(~85 ms, cinque periodi anche a 65 Hz), indipendente dalla `FFT` dello
+spettrogramma — con `FFT 512` la finestra sarebbe 10 ms e non ci starebbe nemmeno
+un periodo. Il segnale viene decimato a ~12 kHz con una media mobile, i cui zeri
+cadono esattamente sulle frequenze che il sottocampionamento ripiegherebbe verso
+il basso: fa da antialias senza filtro dedicato, e il costo scende col quadrato
+del fattore. Range coperto **B1–E6** (60–1300 Hz), una stima ogni 20 ms.
+
 ## Lo spettrogramma
 
-Sta sotto al grafico e **condivide l'asse dei tempi**: stessi margini sinistro e
-destro, stessa finestra, stesso cursore. Un artefatto EMG e il suono che lo
-accompagna stanno sulla stessa verticale.
+Sta sotto al grafico e **condivide l'asse dei tempi** con gli altri due pannelli:
+stessi margini sinistro e destro, stessa finestra, stesso cursore. Un artefatto
+EMG e il suono che lo accompagna stanno sulla stessa verticale.
 
 L'asse X è il tempo del **device** quando c'è un link — i campioni restano dove
 li ha timbrati il firmware, che è tutto il punto del protocollo — e il tempo
@@ -112,9 +169,10 @@ perché è timbrata sulla base vecchia.
 | `log` | asse delle frequenze logaritmico da 40 Hz — comodo per la voce |
 | `dB` | finestra di ampiezza mappata sulla colormap: il primo valore è il fondo, il secondo la saturazione |
 | `FFT` | dimensione della finestra: decide il compromesso Δf = fs/N contro durata N/fs |
-| `offset` | anticipo applicato ai timestamp audio, in ms |
 
-`offset` serve perché la **latenza di acquisizione** (driver + buffer) non è
+`offset`, in cima alla pagina accanto a *Microfono*, vale per **entrambi** i
+pannelli audio: sono timbrati dallo stesso orologio e non possono scollarsi fra
+loro. Serve perché la **latenza di acquisizione** (driver + buffer) non è
 esposta dal browser: si tara una volta battendo un colpo sul sensore, che produce
 insieme un artefatto EMG e un transiente sonoro, e si allineano a occhio.
 
@@ -235,6 +293,8 @@ Servono a rispondere a "il BLE regge?" con numeri invece che a occhio:
   `clip` sale, il microfono sta saturando e lo spettro non è più affidabile.
 - **colonne/s** — cadenza effettiva della FFT, da confrontare con `hop` scritto
   accanto ai controlli dello spettrogramma.
+- **nota / clarity** — l'ultima stima di pitch e quanto vale. `nota` resta `—`
+  finché la clarity non supera la soglia del pannello.
 
 Il grafico disegna ogni campione al **suo** timestamp, non a intervalli
 regolari, e spezza la linea sui buchi. Con dati in ritardo il tracciato resta
@@ -244,7 +304,7 @@ mandare il timestamp.
 ## Stato
 
 Fatto: firmware unico seriale + BLE con scelta automatica del trasporto,
-protocollo, grafico live, spettrogramma e strumentazione.
+protocollo, grafico live, pitch, spettrogramma e strumentazione.
 
 Verificato:
 
@@ -275,8 +335,27 @@ Verificato:
   - al cambio di base dei tempi (link che si connette a microfono già aperto) la
     storia si azzera e si ricostruisce, e i due flussi restano sullo stesso asse:
     ultimo campione EMG e ultima colonna entro qualche decina di ms dal cursore.
+- Pitch, stessa impalcatura. Su un timbro fatto apposta per far sbagliare
+  l'ottava (fondamentale a 0.15, seconda e terza armonica a 0.55 e 0.45):
+  - C2, C3, A3, C4, A4, C5, A5 riconosciute tutte, **nessun errore di ottava**,
+    scarto entro **2 cent**, clarity 0.91–0.999;
+  - rumore bianco → clarity **0.085**, cioè respinto dalla soglia di default;
+    silenzio digitale → nessuna stima, nessun punto nello store;
+  - **0.153 ms** per stima, cioè 0.8% di un core al passo di 20 ms;
+  - catena completa (oscillatore → analyser → YIN → store → grafico) con una
+    melodia C3 G3 C4 E4 A4 C5: 414 stime su 419 sopra soglia, ~62 per nota come
+    atteso, e i 10 spuri sono tutti sui gradini istantanei fra una nota e
+    l'altra — un salto che la voce non fa.
+- Pannelli: piega, ripiega e ridimensionamento (190 → 300 px → compresso a 0)
+  senza errori JS e senza toccare la larghezza, quindi gli assi restano allineati.
 
-Non ancora provato su hardware.
+Nota sul banco di prova: il dispositivo audio finto di Chrome emette silenzio più
+**click a fondo scala**, che sono impulsi a banda larga e da soli fanno sbagliare
+l'ottava a YIN. Vanno scollegati (`A.src.disconnect()`) prima di iniettare il
+tono, altrimenti si misura il rumore del banco. `--use-file-for-fake-audio-capture`
+non inietta nulla in headless: la traccia resta a −120 dBFS.
+
+Non ancora provato su hardware, e il pitch non ancora provato su voce vera.
 
 Nota: il pulsante *Simulatore* genera valori 300–2100, fuori dalla Y di default
 (0–1000), quindi la traccia esce dall'inquadratura. È così da prima; *Auto Y*

@@ -31,10 +31,11 @@
   button.primary:hover:not(:disabled) { background: #388bfd; }
   button.danger { border-color: #6e2c2c; }
   label { color: var(--dim); display: inline-flex; align-items: center; gap: 5px; }
-  input[type=number], select {
+  input[type=number], input[type=text], select {
     width: 72px; background: #0d1117; color: var(--fg);
     border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; font: inherit;
   }
+  input:disabled { opacity: .45; }
   select { width: auto; }
   input[type=checkbox] { accent-color: var(--acc); margin: 0; }
   .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
@@ -45,21 +46,32 @@
   .dot.err { background: var(--bad); }
 
   main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
-  #chartWrap, #specWrap {
-    position: relative; background: #0a0d12;
-    border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
-  }
-  canvas { display: block; width: 100%; height: 380px; }
-  #spec { height: 320px; }   /* più righe di pixel = più dettaglio in frequenza */
 
-  .subbar {
+  /* I pannelli condividono l'asse X, quindi possono cambiare altezza e sparire,
+     mai larghezza: l'allineamento verticale nel tempo resta valido comunque. */
+  .panel {
+    background: #0a0d12; border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .panel .bar {
     display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
     padding: 7px 10px; background: var(--panel); border-bottom: 1px solid var(--line);
   }
-  .subbar .tag {
-    color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+  .panel.folded .bar { border-bottom: 0; }
+  .panel.folded .body, .panel.folded .grip { display: none; }
+  .panel .body { position: relative; height: 380px; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .bar .tag { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .bar input[type=number] { width: 60px; }
+  .fold { width: 22px; padding: 3px 0; line-height: 1; font-size: 10px; text-align: center; }
+  .panel.folded .fold::before { content: "\25B8"; }    /* ▸ chiuso */
+  .fold::before { content: "\25BE"; }                   /* ▾ aperto */
+  .grip { height: 7px; cursor: ns-resize; background: var(--panel); border-top: 1px solid var(--line); }
+  .grip::after {
+    content: ""; display: block; width: 38px; height: 2px;
+    margin: 2.5px auto; border-radius: 1px; background: #3d444d;
   }
-  .subbar input[type=number] { width: 60px; }
+  .grip:hover::after { background: var(--acc); }
 
   #stats {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -90,11 +102,10 @@
   <button id="btnStop" class="danger" disabled>Stop</button>
   <div class="sep"></div>
   <button id="btnAudio">Microfono</button>
+  <!-- vale per entrambi i pannelli audio: sono timbrati dallo stesso orologio -->
+  <label>offset <input type="number" id="aoff" value="0" step="5"> ms</label>
   <div class="sep"></div>
   <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
-  <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
-  <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
-  <button id="btnAuto">Auto Y</button>
   <div class="sep"></div>
   <label>Hz <input type="number" id="rate" value="20" min="1" max="2000" step="1"></label>
   <button id="btnRate">Applica</button>
@@ -103,11 +114,38 @@
 </header>
 
 <main>
-  <div id="chartWrap"><canvas id="chart"></canvas></div>
+  <!-- I tre pannelli condividono l'asse dei tempi: identici PAD.l/PAD.r e finestra.
+       Il pitch sta in mezzo perché è quello che si confronta a occhio col sensore. -->
+  <section class="panel" id="pEmg">
+    <div class="bar">
+      <button class="fold" title="comprimi"></button>
+      <span class="tag">sensore</span>
+      <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
+      <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
+      <button id="btnAuto">Auto Y</button>
+    </div>
+    <div class="body"><canvas id="chart"></canvas></div>
+    <div class="grip"></div>
+  </section>
 
-  <!-- Stesso asse dei tempi del grafico sopra: identici PAD.l/PAD.r e finestra. -->
-  <div id="specWrap" hidden>
-    <div class="subbar">
+  <section class="panel" id="pPitch" hidden>
+    <div class="bar">
+      <button class="fold" title="comprimi"></button>
+      <span class="tag">pitch</span>
+      <label>clarity ≥ <input type="number" id="pthr" value="0.80" min="0" max="1" step="0.05"></label>
+      <label><input type="checkbox" id="pauto" checked> auto Y</label>
+      <label>da <input type="text" id="plo" value="C2" size="3" disabled>
+             a <input type="text" id="phi" value="C6" size="3" disabled></label>
+      <label><input type="checkbox" id="povl"> anche sullo spettrogramma</label>
+      <span class="tag" id="pitchInfo"></span>
+    </div>
+    <div class="body" style="height:190px"><canvas id="pitchCv"></canvas></div>
+    <div class="grip"></div>
+  </section>
+
+  <section class="panel" id="pSpec" hidden>
+    <div class="bar">
+      <button class="fold" title="comprimi"></button>
       <span class="tag">spettrogramma</span>
       <label>fino a <input type="number" id="fmax" value="5" min="0.1" step="0.5"> kHz</label>
       <label><input type="checkbox" id="flog" checked> log</label>
@@ -121,11 +159,11 @@
         <option value="16384">16384</option>
         <option value="32768">32768</option>
       </select></label>
-      <label>offset <input type="number" id="aoff" value="0" step="5"> ms</label>
       <span class="tag" id="specInfo"></span>
     </div>
-    <canvas id="spec"></canvas>
-  </div>
+    <div class="body" style="height:320px"><canvas id="spec"></canvas></div>
+    <div class="grip"></div>
+  </section>
 
   <div id="stats"></div>
   <div id="log"></div>
@@ -135,6 +173,9 @@
     Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
     <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
     un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.
+    Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
+    aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
+    fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
   </p>
 </main>
 
@@ -277,6 +318,17 @@ class Ring {
     }
     return lo;
   }
+  // La regressione del clock si raffina a ogni pacchetto e nei primi istanti può
+  // correggersi di qualche ms: senza questo un elemento tornerebbe indietro nel
+  // tempo e la ricerca binaria non sarebbe più valida. Un salto grosso
+  // all'indietro invece non è rumore della stima ma un cambio di base dei tempi:
+  // si riparte pulito, come fa l'ingestione dei campioni.
+  monotonic(t) {
+    if (!this.n) return t;
+    const tp = this.t[this.last()];
+    if (tp - t > 0.5) { this.clear(); return t; }
+    return t <= tp ? tp + 1e-6 : t;
+  }
 }
 
 class Store extends Ring {
@@ -301,18 +353,25 @@ class SpecStore extends Ring {
   }
   get spanS() { return this.cap * A.hopMs / 1000; }   // storia disponibile
   push(t, col) {
-    // La regressione del clock si raffina a ogni pacchetto e nei primi istanti
-    // può correggersi di qualche ms: senza questo una colonna tornerebbe indietro
-    // nel tempo e la ricerca binaria non sarebbe più valida. Un salto grosso
-    // all'indietro invece non è rumore della stima ma un cambio di base dei
-    // tempi: si riparte pulito, come fa l'ingestione dei campioni.
-    if (this.n) {
-      const tp = this.t[this.last()];
-      if (tp - t > 0.5) this.clear();
-      else if (t <= tp) t = tp + 1e-6;
-    }
+    t = this.monotonic(t);
     this.d.set(col, this.w * this.bins);
     this.advance(t);
+  }
+}
+
+// Una stima di pitch per hop: nota in semitoni (numero MIDI, non Hz — vedi
+// drawPitch) e clarity 0..1. Con l'hop del pitch la capacità vale ~11 minuti.
+class PitchStore extends Ring {
+  constructor(cap = 32768) { super(cap); this.m = new Float32Array(cap); this.c = new Float32Array(cap); }
+  push(t, m, c) {
+    t = this.monotonic(t);
+    this.m[this.w] = m; this.c[this.w] = c;
+    this.advance(t);
+    // Niente filtro sul valore: sui cambi di nota la finestra da 85 ms resta
+    // contaminata per ~4 hop di fila, cioè più di quanto una mediana corta possa
+    // togliere, e il rischio è che ne PROPAGHI uno sbagliato invece di levarlo.
+    // Gli spuri isolati restano quindi visibili: è l'auto-range a essere robusto
+    // (vedi pitchRange), non il dato a essere addolcito.
   }
 }
 
@@ -320,6 +379,7 @@ class SpecStore extends Ring {
 
 const store = new Store();
 const spec = new SpecStore();
+const pitch = new PitchStore();
 const clock = new ClockFit();
 
 // L'asse X è il tempo del DEVICE quando c'è un link — i campioni stanno dove li
@@ -355,8 +415,9 @@ const S = {
 function resetStats() {
   store.clear(); clock.reset();
   // La base dei tempi cambia (torna al clock dell'host, e poi a quello del nuovo
-  // device): le colonne già acquisite sono timbrate sulla vecchia e vanno buttate.
-  spec.clear();
+  // device): quello che è già stato acquisito dall'audio è timbrato sulla
+  // vecchia base e va buttato.
+  spec.clear(); pitch.clear();
   T.epochMs = performance.now();
   Object.assign(S, {
     tUnwrap: null, tAbsUs: 0, lastSeq: null,
@@ -551,9 +612,10 @@ function connectDemo() {
 const DB_MIN = -110, DB_MAX = 0;
 
 const A = {
-  ctx: null, stream: null, analyser: null,
+  ctx: null, stream: null, src: null, analyser: null,
   freq: null, time: null,
   timer: null,
+  pAn: null, pTime: null, pTimer: null,   // catena del pitch, vedi sotto
   sampleRate: 0, hopMs: 0,
   cols: [],                       // timestamp host, per colonne/s
   rms: -Infinity, clips: 0,
@@ -581,12 +643,25 @@ async function toggleAudio() {
     A.analyser.minDecibels = DB_MIN;
     A.analyser.maxDecibels = DB_MAX;
     // NON colleghiamo l'analyser a destination: sarebbe un feedback acustico.
-    A.ctx.createMediaStreamSource(A.stream).connect(A.analyser);
+    A.src = A.ctx.createMediaStreamSource(A.stream);
+    A.src.connect(A.analyser);
+
+    // Il pitch ha il suo analyser con finestra FISSA, indipendente dalla FFT dello
+    // spettrogramma: con FFT 512 la finestra sarebbe 10 ms, meno di un periodo
+    // sotto i 100 Hz, e non ci sarebbe niente da correlare.
+    A.pAn = A.ctx.createAnalyser();
+    A.pAn.fftSize = PITCH_FFT;
+    A.pAn.smoothingTimeConstant = 0;
+    A.src.connect(A.pAn);
+    A.pTime = new Float32Array(PITCH_FFT);
+    setupYin(A.sampleRate);
+    A.pTimer = setInterval(capturePitch, PITCH_HOP);
 
     A.stream.getAudioTracks()[0].addEventListener("ended", () => { if (A.on) closeAudio("sorgente chiusa"); });
     A.cols = []; A.clips = 0;
     applyFft();
-    $("specWrap").hidden = false;
+    $("pSpec").hidden = $("pPitch").hidden = false;
+    resize();
     $("btnAudio").textContent = "Chiudi microfono";
     $("btnAudio").classList.add("danger");
     log("microfono aperto: " + (A.sampleRate / 1000).toFixed(1) + " kHz");
@@ -600,10 +675,12 @@ async function toggleAudio() {
 
 function releaseAudio() {
   if (A.timer) { clearInterval(A.timer); A.timer = null; }
+  if (A.pTimer) { clearInterval(A.pTimer); A.pTimer = null; }
   try { A.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { A.ctx?.close(); } catch {}
-  A.ctx = A.stream = A.analyser = null;
+  A.ctx = A.stream = A.src = A.analyser = A.pAn = null;
   A.rms = -Infinity;
+  P.m = NaN; P.c = 0;
 }
 
 function closeAudio(reason) {
@@ -662,6 +739,142 @@ function captureColumn() {
   if (A.cols.length > 1024) A.cols.splice(0, A.cols.length - 1024);
 }
 
+// ============================== audio: pitch (YIN) ==============================
+//
+// Il picco dello spettro NON è la nota: sulla voce la fondamentale è spesso più
+// debole della seconda o terza armonica, e si sbaglia l'ottava di continuo. Si
+// lavora nel dominio del tempo con YIN — funzione differenza, normalizzazione
+// cumulativa, prima discesa sotto soglia — che è robusto proprio sull'ottava
+// perché prende il PRIMO minimo buono, non il più profondo.
+//
+// YIN è monofonico per costruzione: con una base musicale in cassa il microfono
+// sente due sorgenti armoniche e la stima si aggancia alla più forte. Non è
+// aggirabile qui; è per questo che c'è la clarity, che in quel caso crolla.
+
+const PITCH_FFT = 4096;    // ~85 ms a 48 kHz: 5 periodi anche a 65 Hz (C2)
+const PITCH_HOP = 20;      // 50 stime/s, molto più di quanto serva all'occhio
+const F_LO = 60, F_HI = 1300;
+const YIN_THR = 0.12;      // soglia assoluta sulla CMND, come nel paper
+
+const P = {
+  D: 1, fsd: 0,            // fattore di decimazione e frequenza risultante
+  x: null, diff: null, cmnd: null,
+  lagMin: 0, lagMax: 0, W: 0,
+  m: NaN, c: 0,            // ultima stima: semitoni MIDI e clarity
+};
+
+// Un semitono è un rapporto di frequenza costante, quindi la scala giusta per la
+// nota è logaritmica: in numero MIDI il vibrato di mezzo tono è alto uguale su C3
+// e su C5, in Hz no. Tutto a valle lavora in semitoni, gli Hz solo per leggerli.
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const STEPS = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
+const BLACK = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0];
+
+const midiOf = (f) => 69 + 12 * Math.log2(f / 440);
+const hzOf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const noteName = (m) => { const r = Math.round(m); return NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1); };
+const centsStr = (m) => { const c = Math.round((m - Math.round(m)) * 100); return (c < 0 ? "−" : "+") + Math.abs(c) + " ¢"; };
+
+function parseNote(s, dflt) {
+  const g = /^\s*([a-gA-G])([#b]?)\s*(-?\d+)\s*$/.exec(s || "");
+  if (!g) return dflt;
+  return 12 * (+g[3] + 1) + STEPS[g[1].toLowerCase()] + (g[2] === "#" ? 1 : g[2] === "b" ? -1 : 0);
+}
+
+function setupYin(sr) {
+  // Sotto i 1300 Hz non serve la banda piena: decimando si abbassa il costo con
+  // il QUADRATO del fattore (meno campioni e meno lag da provare).
+  P.D = Math.max(1, Math.round(sr / 12000));
+  P.fsd = sr / P.D;
+  const n = Math.floor(PITCH_FFT / P.D);
+  P.lagMin = Math.max(2, Math.floor(P.fsd / F_HI));
+  P.lagMax = Math.min(n - 64, Math.ceil(P.fsd / F_LO));
+  P.W = n - P.lagMax;                 // campioni confrontabili al lag massimo
+  P.x = new Float32Array(n);
+  P.diff = new Float32Array(P.lagMax + 1);
+  P.cmnd = new Float32Array(P.lagMax + 1);
+  $("pitchInfo").textContent =
+    `finestra ${(1000 * PITCH_FFT / sr).toFixed(0)} ms · ${(P.fsd / 1000).toFixed(1)} kHz interni` +
+    ` · ${noteName(midiOf(F_LO))}–${noteName(midiOf(F_HI))}`;
+}
+
+// Ritorna {m, c}: semitoni MIDI e clarity 0..1. m = NaN quando non c'è segnale.
+function yin(buf) {
+  const { D, x, diff, cmnd, lagMin, lagMax, W } = P;
+  const n = x.length;
+
+  // Decimazione con media mobile di D campioni: i suoi zeri cadono ESATTAMENTE
+  // sui multipli di fsd, cioè sulle frequenze che il sottocampionamento
+  // ripiegherebbe verso il basso. Fa da antialias senza filtro dedicato.
+  let energy = 0;
+  for (let j = 0, i = 0; j < n; j++, i += D) {
+    let s = 0;
+    for (let k = 0; k < D; k++) s += buf[i + k];
+    s /= D;
+    x[j] = s; energy += s * s;
+  }
+  if (energy / n < 1e-7) return { m: NaN, c: 0 };     // ~ -70 dBFS: silenzio
+
+  for (let tau = 1; tau <= lagMax; tau++) {
+    let s = 0;
+    for (let j = 0; j < W; j++) { const d = x[j] - x[j + tau]; s += d * d; }
+    diff[tau] = s;
+  }
+  // Normalizzazione cumulativa: senza, diff(tau) cresce con tau e il minimo
+  // globale finisce sempre sui lag lunghi (errore di ottava verso il basso).
+  let run = 0;
+  cmnd[0] = 1;
+  for (let tau = 1; tau <= lagMax; tau++) {
+    run += diff[tau];
+    cmnd[tau] = run > 0 ? diff[tau] * tau / run : 1;
+  }
+
+  // Prima discesa sotto soglia, poi giù fino in fondo a quella valle. È questo
+  // "primo" invece di "migliore" che evita di agganciare la seconda armonica.
+  let best = -1;
+  for (let tau = lagMin; tau <= lagMax; tau++) {
+    if (cmnd[tau] < YIN_THR) {
+      while (tau < lagMax && cmnd[tau + 1] < cmnd[tau]) tau++;
+      best = tau; break;
+    }
+  }
+  // Niente sotto soglia: diamo comunque il candidato migliore e lasciamo che sia
+  // la clarity a dire quanto vale. Il grafico lo taglierà da solo.
+  if (best < 0) {
+    let bv = Infinity;
+    for (let tau = lagMin; tau <= lagMax; tau++) if (cmnd[tau] < bv) { bv = cmnd[tau]; best = tau; }
+    if (best < 0) return { m: NaN, c: 0 };
+  }
+
+  // Interpolazione parabolica: senza, la risoluzione è quella dei lag interi —
+  // a 12 kHz interni sono ~40 cent a C5, un errore che si vede.
+  let tau = best;
+  if (best > lagMin && best < lagMax) {
+    const y0 = cmnd[best - 1], y1 = cmnd[best], y2 = cmnd[best + 1];
+    const den = y0 + y2 - 2 * y1;
+    if (den > 0) tau = best + 0.5 * (y0 - y2) / den;
+  }
+  const f = P.fsd / tau;
+  if (!(f >= F_LO && f <= F_HI)) return { m: NaN, c: 0 };
+  return { m: midiOf(f), c: Math.max(0, Math.min(1, 1 - cmnd[best])) };
+}
+
+function capturePitch() {
+  const a = A.pAn;
+  if (!a) return;
+  const hostMs = performance.now();
+  a.getFloatTimeDomainData(A.pTime);
+  const r = yin(A.pTime);
+  P.m = r.m; P.c = r.c;
+  if (!isFinite(r.m)) return;         // niente da timbrare: la linea si spezza
+  // Stessa regola delle colonne dello spettrogramma: la stima descrive gli ULTIMI
+  // fftSize campioni, quindi va timbrata al centro di quella finestra, e `offset`
+  // compensa la latenza di acquisizione. Condividendo entrambi con lo
+  // spettrogramma, i due pannelli non possono scollarsi fra loro.
+  const tCenter = hostMs - 500 * PITCH_FFT / A.sampleRate - (+$("aoff").value || 0);
+  pitch.push(T.fromHost(tCenter), r.m, r.c);
+}
+
 // ============================== sessione ==============================
 
 function startSession(kind, label) {
@@ -696,23 +909,52 @@ async function sendCommand(text) {
 // ============================== grafico ==============================
 
 const cv = $("chart"), ctx = cv.getContext("2d");
+const pitCv = $("pitchCv"), pctx = pitCv.getContext("2d");
 const specCv = $("spec"), sctx = specCv.getContext("2d");
-let dpr = 1, cssW = 0, cssH = 0, specW = 0, specH = 0;
+let dpr = 1, cssW = 0, cssH = 0, pitW = 0, pitH = 0, specW = 0, specH = 0;
+
+// Un pannello compresso o nascosto ha dimensione 0: il canvas la segue e chi
+// disegna si limita a saltarlo.
+function fit(c, cx) {
+  const w = c.clientWidth, h = c.clientHeight;
+  c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [w, h];
+}
 
 function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
-  cssW = cv.clientWidth; cssH = cv.clientHeight;
-  cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  specW = specCv.clientWidth; specH = specCv.clientHeight;
-  specCv.width = Math.round(specW * dpr); specCv.height = Math.round(specH * dpr);
-  sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  [cssW, cssH] = fit(cv, ctx);
+  [pitW, pitH] = fit(pitCv, pctx);
+  [specW, specH] = fit(specCv, sctx);
 }
-new ResizeObserver(resize).observe(cv);
-new ResizeObserver(resize).observe(specCv);
+for (const c of [cv, pitCv, specCv]) new ResizeObserver(resize).observe(c);
 
-const PAD = { l: 52, r: 10, t: 10, b: 22 };   // l e r condivisi coi due canvas: gli assi X coincidono
+// Piega e ridimensiona. L'altezza sta sul .body e il canvas la riempie; la
+// LARGHEZZA non si tocca mai, è quella che tiene allineati gli assi dei tempi.
+for (const p of document.querySelectorAll(".panel")) {
+  const body = p.querySelector(".body"), grip = p.querySelector(".grip");
+  p.querySelector(".fold").onclick = () => p.classList.toggle("folded");
+  grip.addEventListener("pointerdown", (e) => {
+    grip.setPointerCapture(e.pointerId);
+    const y0 = e.clientY, h0 = body.clientHeight;
+    const move = (ev) => { body.style.height = Math.max(70, Math.min(1400, h0 + ev.clientY - y0)) + "px"; };
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    e.preventDefault();
+  });
+}
+
+// l e r condivisi dai tre canvas: è quello che fa coincidere gli assi X. Il
+// margine destro è largo quanto quello sinistro perché ci stanno le stesse
+// etichette: sul bordo destro c'è l'ADESSO, ed è lì che si guarda dal vivo.
+const PAD = { l: 52, r: 40, t: 10, b: 22 };
 const SPAD = { t: 10, b: 10 };
+const PPAD = { t: 10, b: 16 };                // b: ci sta la striscia di clarity
 
 // Il cursore avanza col clock dell'host mappato sull'asse del grafico: se i dati
 // si fermano, il cursore va avanti e il buco si VEDE. Con tutto spento la vista
@@ -729,8 +971,9 @@ function timeAxis() {
 function draw() {
   requestAnimationFrame(draw);
   const ax = timeAxis();
-  if (cssW) drawChart(ax);
-  if (specW && !$("specWrap").hidden) drawSpec(ax);
+  if (cssW && cssH) drawChart(ax);
+  if (pitW && pitH) drawPitch(ax);
+  if (specW && specH) drawSpec(ax);
   updateStats();
 }
 
@@ -751,7 +994,8 @@ function drawChart(ax) {
   for (let i = 0; i <= 4; i++) {
     const v = yMin + (yMax - yMin) * i / 4, y = Math.round(Y(v)) + .5;
     ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(cssW - PAD.r, y); ctx.stroke();
-    ctx.fillText(v.toFixed(0), PAD.l - 6, y);
+    ctx.textAlign = "right"; ctx.fillText(v.toFixed(0), PAD.l - 6, y);
+    ctx.textAlign = "left"; ctx.fillText(v.toFixed(0), cssW - PAD.r + 6, y);
   }
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   const step = W <= 2 ? 0.25 : W <= 6 ? 1 : W <= 20 ? 2 : 5;
@@ -787,6 +1031,166 @@ function drawChart(ax) {
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.font = "11px ui-monospace, monospace";
     ctx.fillText(store.v[li].toFixed(0), PAD.l + 6, PAD.t + 4);
+  }
+}
+
+// ============================== grafico del pitch ==============================
+//
+// Asse Y in semitoni con lo sfondo di una tastiera: i tasti neri come bande
+// scure, i DO con la linea marcata e il nome. Così la nota si legge senza
+// contare le tacche, che è tutto il punto del pannello.
+
+const PITCH_COL = "#7ee787";                       // distinto dal blu EMG e dal magma
+const pMaxGap = 2.5 * PITCH_HOP / 1000;
+const pThr = () => Math.max(0, Math.min(1, +$("pthr").value || 0));
+
+// Il range automatico insegue i dati con un filtro lento: a inseguimento
+// istantaneo l'asse ballerebbe a ogni frame e il grafico sarebbe illeggibile.
+//
+// Gli estremi sono PERCENTILI, non minimo e massimo: un singolo spurio d'ottava
+// a un attacco schiaccerebbe altrimenti tutto il resto in mezza altezza. Chi
+// esce dal quadro si vede lo stesso, perché la linea va a sbattere sul bordo —
+// che è l'informazione giusta da dare, invece di nascondere l'outlier o di
+// lasciargli decidere la scala. L'istogramma è per semitono, cioè esattamente la
+// risoluzione che serve all'asse, e costa una passata sola senza allocazioni.
+const P_TRIM = 0.02;
+const pHist = new Int32Array(128);
+let pRange = null;
+
+function pitchRange(ax) {
+  if (!$("pauto").checked) {
+    const lo = parseNote($("plo").value, 36), hi = parseNote($("phi").value, 84);
+    return { lo: Math.min(lo, hi - 2), hi: Math.max(hi, lo + 2) };
+  }
+  pHist.fill(0);
+  let tot = 0;
+  const thr = pThr();
+  for (let k = pitch.firstAtOrAfter(ax.tLeft); k < pitch.n; k++) {
+    const i = pitch.idx(k);
+    if (pitch.c[i] < thr) continue;
+    const b = Math.round(pitch.m[i]);
+    if (b >= 0 && b < 128) { pHist[b]++; tot++; }
+  }
+  let tLo, tHi;
+  if (!tot) { tLo = 48; tHi = 72; }                // niente in vista: due ottave da C3
+  else {
+    const cut = Math.floor(tot * P_TRIM);
+    let acc = 0, lo = 0, hi = 127;
+    for (let b = 0; b < 128; b++) { acc += pHist[b]; if (acc > cut) { lo = b; break; } }
+    acc = 0;
+    for (let b = 127; b >= 0; b--) { acc += pHist[b]; if (acc > cut) { hi = b; break; } }
+    const span = Math.max(12, hi - lo + 4);        // mai meno di un'ottava
+    tLo = Math.round((lo + hi) / 2 - span / 2); tHi = tLo + span;
+  }
+  if (!pRange) pRange = { lo: tLo, hi: tHi };
+  else { pRange.lo += (tLo - pRange.lo) * 0.06; pRange.hi += (tHi - pRange.hi) * 0.06; }
+  return pRange;
+}
+
+function drawPitch(ax) {
+  pctx.clearRect(0, 0, pitW, pitH);
+  const gw = pitW - PAD.l - PAD.r, gh = pitH - PPAD.t - PPAD.b;
+  if (gw <= 0 || gh <= 0) return;
+
+  const r = pitchRange(ax);
+  const X = (t) => PAD.l + ((t - ax.tLeft) / ax.W) * gw;
+  const Y = (m) => PPAD.t + gh - ((m - r.lo) / (r.hi - r.lo)) * gh;
+  const semi = gh / (r.hi - r.lo);                 // pixel per semitono
+  const m0 = Math.floor(r.lo), m1 = Math.ceil(r.hi);
+  const thr = pThr(), from = pitch.firstAtOrAfter(ax.tLeft);
+
+  pctx.save();
+  pctx.beginPath(); pctx.rect(PAD.l, PPAD.t, gw, gh); pctx.clip();
+
+  // tastiera
+  pctx.fillStyle = "#11161d";
+  for (let m = m0; m <= m1; m++) {
+    if (BLACK[((m % 12) + 12) % 12]) pctx.fillRect(PAD.l, Y(m + 0.5), gw, semi);
+  }
+  // confini fra le note: tutti solo se c'è spazio, altrimenti solo le ottave
+  pctx.lineWidth = 1;
+  for (let m = m0; m <= m1; m++) {
+    const isC = ((m % 12) + 12) % 12 === 0;
+    if (!isC && semi < 9) continue;
+    pctx.strokeStyle = isC ? "#2f3846" : "#191f28";
+    const y = Math.round(Y(m - 0.5)) + .5;
+    pctx.beginPath(); pctx.moveTo(PAD.l, y); pctx.lineTo(PAD.l + gw, y); pctx.stroke();
+  }
+  // reticolo dei tempi, con lo stesso passo del grafico EMG
+  const step = ax.W <= 2 ? 0.25 : ax.W <= 6 ? 1 : ax.W <= 20 ? 2 : 5;
+  pctx.strokeStyle = "#1c222c";
+  for (let s = Math.ceil(ax.tLeft / step) * step; s <= ax.tNow; s += step) {
+    const x = Math.round(X(s)) + .5;
+    pctx.beginPath(); pctx.moveTo(x, PPAD.t); pctx.lineTo(x, PPAD.t + gh); pctx.stroke();
+  }
+
+  // La linea si interrompe quando la stima non è credibile: un tratto continuo
+  // sopra il silenzio o sopra una consonante sarebbe un'invenzione.
+  pctx.strokeStyle = PITCH_COL; pctx.lineWidth = 1.8; pctx.lineJoin = "round";
+  pctx.beginPath();
+  let prevT = null, lastGood = -1;
+  for (let k = from; k < pitch.n; k++) {
+    const i = pitch.idx(k);
+    if (pitch.c[i] < thr) { prevT = null; continue; }
+    const t = pitch.t[i], x = X(t), y = Y(pitch.m[i]);
+    if (prevT === null || t - prevT > pMaxGap) pctx.moveTo(x, y); else pctx.lineTo(x, y);
+    prevT = t; lastGood = i;
+  }
+  pctx.stroke();
+
+  pctx.strokeStyle = "#30363d"; pctx.lineWidth = 1;
+  const xc = Math.round(X(ax.tNow)) + .5;
+  pctx.beginPath(); pctx.moveTo(xc, PPAD.t); pctx.lineTo(xc, PPAD.t + gh); pctx.stroke();
+
+  if (lastGood >= 0) {
+    pctx.fillStyle = PITCH_COL;
+    pctx.beginPath(); pctx.arc(X(pitch.t[lastGood]), Y(pitch.m[lastGood]), 2.5, 0, 7); pctx.fill();
+  }
+  pctx.restore();
+
+  // Striscia di clarity: dice quando fidarsi della linea qui sopra. Con una base
+  // musicale in cassa scende subito, ed è il segnale che il valore non vale.
+  const sy = PPAD.t + gh + 5;
+  for (let k = from; k < pitch.n; k++) {
+    const i = pitch.idx(k), x = X(pitch.t[i]);
+    if (x < PAD.l || x > PAD.l + gw) continue;
+    const c = pitch.c[i];
+    pctx.fillStyle = c >= thr ? "#3fb950" : c >= thr * 0.75 ? "#d29922" : "#6e2c2c";
+    pctx.fillRect(x, sy, 2, 3);
+  }
+
+  // Nomi delle note nei margini, fuori dal clip. Su ENTRAMBI i lati: dal vivo si
+  // guarda il bordo destro, perché è lì che esce la nota che si sta cantando.
+  pctx.font = "10px ui-monospace, monospace";
+  pctx.textBaseline = "middle";
+  for (let m = m0; m <= m1; m++) {
+    const isC = ((m % 12) + 12) % 12 === 0;
+    if (!isC && semi < 12) continue;
+    const y = Y(m);
+    if (y < PPAD.t + 4 || y > PPAD.t + gh - 4) continue;
+    const nm = noteName(m);
+    pctx.fillStyle = isC ? "#8b949e" : "#5a626c";
+    pctx.textAlign = "right"; pctx.fillText(nm, PAD.l - 6, y);
+    pctx.textAlign = "left"; pctx.fillText(nm, PAD.l + gw + 8, y);
+  }
+
+  if (lastGood >= 0) {
+    const m = pitch.m[lastGood], y = Y(m);
+    pctx.fillStyle = PITCH_COL; pctx.textAlign = "left"; pctx.textBaseline = "top";
+    pctx.font = "11px ui-monospace, monospace";
+    pctx.fillText(`${noteName(m)} ${centsStr(m)} · ${hzOf(m).toFixed(1)} Hz`, PAD.l + 6, PPAD.t + 4);
+
+    // Targhetta all'altezza della linea, sull'asse destro: copre l'etichetta
+    // fissa che le sta dietro, ed è voluto — quella che conta adesso è questa.
+    if (y > PPAD.t - 1 && y < PPAD.t + gh + 1) {
+      const bx = PAD.l + gw + 3, bw = PAD.r - 6;
+      pctx.fillStyle = PITCH_COL;
+      pctx.fillRect(bx, y - 7, bw, 14);
+      pctx.fillStyle = "#0a0d12";
+      pctx.font = "bold 10px ui-monospace, monospace";
+      pctx.textAlign = "center"; pctx.textBaseline = "middle";
+      pctx.fillText(noteName(m), bx + bw / 2, y + .5);
+    }
   }
 }
 
@@ -1011,11 +1415,33 @@ function drawSpec(ax) {
   sctx.textAlign = "right"; sctx.textBaseline = "middle";
   for (const f of ticks) {
     const y = Math.round(yOf(f)) + .5;
+    const yl = Math.min(SPAD.t + gh - 5, Math.max(SPAD.t + 5, y));
+    const lbl = f >= 1000 ? f / 1000 + "k" : String(f);
     sctx.beginPath(); sctx.moveTo(PAD.l, y); sctx.lineTo(specW - PAD.r, y); sctx.stroke();
-    sctx.fillText(f >= 1000 ? f / 1000 + "k" : String(f), PAD.l - 6,
-                  Math.min(SPAD.t + gh - 5, Math.max(SPAD.t + 5, y)));
+    sctx.textAlign = "right"; sctx.fillText(lbl, PAD.l - 6, yl);
+    sctx.textAlign = "left"; sctx.fillText(lbl, specW - PAD.r + 6, yl);
   }
   sctx.textAlign = "left"; sctx.fillText("Hz", 6, SPAD.t + 5);
+
+  // La stessa linea sopra lo spettrogramma: deve cadere sulla prima riga
+  // armonica. Quando non ci cade, il pitch tracker sta sbagliando e si vede.
+  if ($("povl").checked && pitch.n) {
+    const thr = pThr();
+    sctx.save();
+    sctx.beginPath(); sctx.rect(PAD.l, SPAD.t, gw, gh); sctx.clip();
+    sctx.strokeStyle = "rgba(126,231,135,.9)"; sctx.lineWidth = 1.4; sctx.lineJoin = "round";
+    sctx.beginPath();
+    let prevT = null;
+    for (let k = pitch.firstAtOrAfter(ax.tLeft); k < pitch.n; k++) {
+      const i = pitch.idx(k);
+      if (pitch.c[i] < thr) { prevT = null; continue; }
+      const t = pitch.t[i], x = PAD.l + ((t - ax.tLeft) / ax.W) * gw, y = yOf(hzOf(pitch.m[i]));
+      if (prevT === null || t - prevT > pMaxGap) sctx.moveTo(x, y); else sctx.lineTo(x, y);
+      prevT = t;
+    }
+    sctx.stroke();
+    sctx.restore();
+  }
 }
 
 // ============================== pannello statistiche ==============================
@@ -1044,6 +1470,9 @@ const STATS = [
       if (!A.on) return ""; return A.rms > -1 ? "bad" : A.rms > -60 ? "ok" : "warn"; }],
   ["colonne/s", () => A.on ? rate(A.cols).toFixed(0) : "—"],
   ["clip audio", () => A.clips, () => A.clips ? "bad" : "ok"],
+  ["nota", () => (A.on && isFinite(P.m) && P.c >= pThr()) ? noteName(P.m) + " " + centsStr(P.m) : "—"],
+  ["clarity", () => A.on ? P.c.toFixed(2) : "—", () => {
+      if (!A.on) return ""; return P.c >= pThr() ? "ok" : P.c >= pThr() * 0.75 ? "warn" : "bad"; }],
 ];
 
 function rate(arr) {
@@ -1101,6 +1530,13 @@ $("btnDemo").onclick = connectDemo;
 $("btnStop").onclick = () => stop("manuale");
 $("btnAudio").onclick = toggleAudio;
 $("fft").onchange = applyFft;
+$("pauto").onchange = () => {
+  const auto = $("pauto").checked;
+  $("plo").disabled = $("phi").disabled = auto;
+  // Passando ad automatico si riparte dai dati in vista, senza inseguire da dove
+  // era rimasto il range manuale.
+  if (auto) pRange = null;
+};
 $("btnRate").onclick = () => {
   const hz = +$("rate").value;
   if (hz > 0) sendCommand("P" + Math.round(1e6 / hz));

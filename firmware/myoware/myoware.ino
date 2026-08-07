@@ -48,7 +48,7 @@
 
 // 1 = ignora l'ADC e genera una linea finta in 0..1000, per provare tutta la
 // catena senza il sensore attaccato. Ricordati di rimetterlo a 0.
-#define MYO_SIMULATE 1
+#define MYO_SIMULATE 0
 #define MYO_SIM_MAX 1000
 
 // Trasporti compilati. Metterne uno a 0 riproduce esattamente il vecchio

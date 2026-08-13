@@ -8,7 +8,7 @@ freddo: qui c'è il perché, cosa si tocca e quando è finita.
 | 1 | Diagnostica dei permessi (bug Brave mobile) | **fatta** |
 | 2 | Build: sorgenti a moduli, bundle in uscita | **fatta** |
 | 3 | UI mobile | **fatta** |
-| 4 | Registrazione video + audio | da fare |
+| 4 | Registrazione video + audio | **fatta** |
 
 L'ordine non è arbitrario: la 2 viene prima della 3 e della 4 perché entrambe
 aggiungono parecchio codice a un file già a 1564 righe, e i test unitari della
@@ -259,9 +259,50 @@ uscita. Se il microfono è chiuso si registra solo video.
 stop. I dati sono già in un array timbrato; è l'unico output che rende una
 sessione rianalizzabile, cosa che un video non è.
 
-**Fatto quando.** Si preme *Registra*, si sceglie cosa includere, si ferma, e si
-scarica un `.webm` in cui i grafici scorrono e l'audio è allineato a quello che
-mostravano.
+**Fatto quando.** ✅ Si preme *Registra*, si sceglie cosa includere, si ferma, e
+si scarica un `.webm` in cui i grafici scorrono e l'audio è allineato a quello
+che mostravano. Verificato in Chrome headless con ffprobe sul file prodotto:
+1240×906 VP9 + Opus, **173 fotogrammi in 5.745 s (30.1 fps)** contro i 30
+chiesti, le due tracce che partono entro **39 ms** e finiscono entro **6 ms**
+l'una dall'altra, un fotogramma estratto a metà che contiene davvero i tre
+pannelli. Il CSV è arrivato con 192 righe e tempi strettamente crescenti.
+
+**Com'è venuto.** L'impianto è quello previsto — un canvas di composizione, un
+solo recorder, niente sincronizzazione a mano — con cinque cose da ricordare:
+
+- **L'impaginazione è una funzione pura** (`record/layout.js`), ed è l'unica
+  parte che si poteva sbagliare in silenzio: un rettangolo storto si vede solo
+  riguardando il file, quindi sta da sola e la coprono i test. Due dettagli non
+  ovvi ci sono finiti dentro: le dimensioni **pari** (i codec 4:2:0 devono
+  arrotondare il piano di crominanza e certi encoder rifiutano l'ingresso
+  dispari) e lo scarto degli strati di misura 0 — un pannello compresso o
+  nascosto — perché una `drawImage` con sorgente larga 0 è un'eccezione, non un
+  no-op.
+- **La geometria si fissa alla partenza.** Un `MediaRecorder` non cambia
+  risoluzione a metà stream, quindi se durante la registrazione si tira il grip
+  il pannello viene *scalato* dentro lo spazio che aveva, e se lo si comprime la
+  sua banda resta fondo. Provato: il file non cambia formato a metà.
+- **Anche l'audio si decide alla partenza**, per lo stesso motivo: una traccia
+  aggiunta dopo non entrerebbe nel file. Microfono chiuso = video muto, e lo
+  dice il log. Il caso opposto — chiudere il microfono *mentre* si registra, che
+  ferma la traccia che il recorder ha in mano — non rompe niente: il video
+  continua e l'audio raccolto fino a lì resta nel file.
+- **Il file non ha la durata nell'header, ed è normale.** MediaRecorder scrive un
+  WebM "live": a inizio file la durata non è nota e il campo `Duration` resta
+  vuoto. Si riproduce, ma qualche player non mostra la barra e non fa seek.
+  Rimetterla a posto sarebbe riscrivere l'EBML a fine registrazione (una
+  dipendenza), oppure una riga fuori dall'app: `ffmpeg -i x.webm -c copy y.webm`.
+  Sta nel README, non nel codice.
+- **Il CSV era davvero quasi gratis** e vale più di quanto costa: esporta la
+  finestra viva del ring buffer con i tempi a microsecondi, che è la risoluzione
+  a cui timbra il firmware — scriverne meno butterebbe via l'informazione per cui
+  esiste il protocollo.
+
+**Aperto.** Il sesto pulsante nell'header non ha rotto il mobile (a 390×844
+l'header resta 102 px con i pulsanti su una riga sola, come alla fase 3), ma è
+l'ultimo che ci sta: il prossimo va nel cassetto. E la registrazione lunga è
+ancora tutta in RAM come array di Blob — sopra i ~10 minuti serve
+`showSaveFilePicker()`.
 
 ---
 

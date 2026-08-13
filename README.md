@@ -17,6 +17,7 @@ app/                           ricevitore web (Vite): grafico live, pitch, spett
 app/src/core/                  protocollo, clock, store, ingestione — senza DOM, quindi testabili
 app/src/audio/                 acquisizione microfono e YIN
 app/src/draw/                  i tre canvas, che condividono l'asse dei tempi
+app/src/record/                registrazione video+audio ed export CSV
 app/test/                      test unitari (vitest)
 docs/PIANO.md                  piano di lavoro in quattro fasi
 ```
@@ -52,7 +53,7 @@ Per modificarla:
 cd app
 npm install
 npm run dev      # http://localhost:5173, con ricarica a caldo
-npm test         # protocollo, COBS, clock, store, YIN
+npm test         # protocollo, COBS, clock, store, YIN, impaginazione del video, CSV
 npm run build    # bundle in app/dist
 ```
 
@@ -81,6 +82,36 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 **Microfono.** Il pulsante *Microfono* apre i due pannelli audio, pitch e
 spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
 viceversa.
+
+**Registrare.** *Registra* salva un `.webm` unico con i pannelli spuntati sotto
+⚙ (`video: sensore / pitch / spettro`) e l'audio del microfono, se è aperto. Un
+canvas fuori schermo riceve a ogni fotogramma i tre canvas impilati,
+`captureStream` lo trasforma in traccia video, e la traccia del microfono entra
+nello **stesso** `MediaStream`: la sincronia audio/video la garantisce il
+registratore, che timbra le due tracce con lo stesso orologio, e non c'è niente
+da allineare a mano. L'`offset` audio agisce sul disegno, quindi finisce dentro
+il video da sé — il file mostra esattamente quello che si vedeva a schermo.
+
+Tre cose da sapere prima di premerlo:
+
+- **Non cambiare scheda mentre registri.** In background `requestAnimationFrame`
+  si ferma, il canvas non cambia più e il video prende un fotogramma lunghissimo.
+  Il log lo dice quando succede, ma il file è già rovinato.
+- Il file **non ha la durata nell'header**: `MediaRecorder` scrive un WebM
+  *live*, dove a inizio file la durata non è nota. Si riproduce, ma qualche
+  player non mostra la barra e non fa seek. Si rimette a posto fuori dall'app con
+  `ffmpeg -i registrazione.webm -c copy sistemato.webm`.
+- Formato VP9 + Opus, negoziato con `MediaRecorder.isTypeSupported`; i chunk
+  stanno in RAM, quindi per sessioni oltre i ~10 minuti conviene spezzare.
+
+Quello che si vede a schermo si registra com'è: geometria e strati si fissano
+alla partenza, perché un `MediaRecorder` non cambia risoluzione a metà stream.
+Se durante la registrazione ridimensioni un pannello, il video lo scala dentro lo
+spazio che aveva; se lo comprimi, la sua banda resta fondo.
+
+**CSV.** Il pulsante *CSV* esporta i campioni EMG in memoria — `t_s,valore`, con
+il tempo a microsecondi, che è la risoluzione a cui timbra il firmware. È l'unico
+output con cui una sessione si **rianalizza**: un video non lo è.
 
 **Se qualcosa non parte.** La prima riga del log dice quali API ci sono e in che
 stato è il permesso del microfono; quando una richiesta fallisce, sotto
@@ -377,7 +408,8 @@ mandare il timestamp.
 ## Stato
 
 Fatto: firmware unico seriale + BLE con scelta automatica del trasporto,
-protocollo, grafico live, pitch, spettrogramma e strumentazione.
+protocollo, grafico live, pitch, spettrogramma, strumentazione, registrazione
+video + audio ed export CSV.
 
 Verificato:
 
@@ -447,6 +479,32 @@ Verificato:
   - **1280×1000**: l'header ha gli stessi elementi nelle stesse posizioni di
     prima (lo stato in fondo a destra), altezze 380/190/320 px, `PAD` 52/40 —
     il desktop non si è accorto di niente.
+- Registrazione, in Chrome headless con `ffprobe` e `ffmpeg` sul file davvero
+  scaricato — non sullo stato interno dell'app:
+  - `.webm` **1240×906 VP9 + Opus**, una traccia video e una audio nello stesso
+    file, **173 fotogrammi in 5.745 s = 30.1 fps** contro i 30 chiesti a
+    `captureStream`;
+  - le due tracce partono entro **39 ms** e finiscono entro **6 ms** l'una
+    dall'altra: è la sincronia che dà il recorder, senza allineare niente;
+  - un fotogramma estratto a metà contiene davvero i tre pannelli impilati, con
+    la tastiera del pitch, la targhetta della nota e le colonne di spettro;
+  - comprimere un pannello **a registrazione avviata** non cambia la geometria
+    del file e non solleva eccezioni; chiudere il **microfono** a registrazione
+    avviata non ferma il video e non perde l'audio già raccolto;
+  - nessuno strato spuntato → rifiuto pulito con il motivo nel log; microfono
+    chiuso → file senza traccia audio, e il log lo dice;
+  - CSV: intestazione `t_s,valore`, una riga per campione, tempi strettamente
+    crescenti; nomi `myolink-AAAAMMGG-hhmmss.ext` per entrambi i formati;
+  - con il sesto pulsante nell'header, a **390×844** l'header resta **102 px** e
+    i pulsanti su una riga sola come alla fase 3, e le spunte del video sono
+    raggiungibili nel cassetto ⚙;
+  - **51 test unitari** verdi in tutto (16 nuovi su impaginazione del video,
+    negoziazione del formato, nomi dei file e CSV).
+
+Il `.webm` di `MediaRecorder` non ha la durata nell'header — è un WebM *live*,
+dove a inizio file la durata non è nota. Verificato che è così anche qui, ed è il
+comportamento del browser, non un difetto dell'app: `ffmpeg -c copy` la
+ricostruisce.
 
 Nota sul banco di prova: il dispositivo audio finto di Chrome emette silenzio più
 **click a fondo scala**, che sono impulsi a banda larga e da soli fanno sbagliare
@@ -457,6 +515,9 @@ non inietta nulla in headless: la traccia resta a −120 dBFS.
 Non ancora provato su hardware, e il pitch non ancora provato su voce vera. La UI
 mobile è misurata su un telefono **emulato**: le metriche e gli eventi di tocco
 sono quelli veri, la barra del browser che si ritrae e la latenza del dito no.
+Delle registrazioni si è verificato il file, non la resa a occhio e orecchio: il
+microfono finto emette silenzio più click, quindi il *contenuto* audio del video
+non dice niente sulla voce.
 
 Nota: il pulsante *Simulatore* genera valori 300–2100, fuori dalla Y di default
 (0–1000), quindi la traccia esce dall'inquadratura. È così da prima; *Auto Y*
@@ -482,9 +543,10 @@ indipendenti e ripartibili a freddo:
 3. **UI mobile** — fatta: controlli nei cassetti, altezze in `svh`, grip da
    prendere col dito, margini degli assi stretti. Stessa pagina, due media query,
    nessuna riga di codice di disegno cambiata.
-4. **Registrazione video + audio** — canvas di composizione e `MediaRecorder`,
-   con la sincronia A/V garantita dal recorder. Solo esportazione: niente
-   riapertura di sessione.
+4. **Registrazione video + audio** — fatta: canvas di composizione e
+   `MediaRecorder`, con la sincronia A/V garantita dal recorder e non ricostruita
+   a mano, più l'export CSV dei campioni. Solo esportazione: niente riapertura di
+   sessione.
 
 Fuori piano per ora: timeline scrubbabile e render offline in WebCodecs;
 **seriale su Android** via WebUSB (Web Serial su Android non esiste, e il parser
@@ -505,9 +567,11 @@ Non c'è `vercel.json` perché non serve nulla da configurare — e con la Root
 Directory impostata un `vercel.json` nella radice del repo verrebbe comunque
 ignorato: Vercel lo cerca dentro la root directory, cioè in `app/`.
 
-Il bundle minificato è **28 kB di JS e 3.4 kB di CSS** (11.5 + 1.3 kB gzip)
-contro i 66 kB del file unico di prima. È un miglioramento reale ma piccolo in
-assoluto: la build non è stata fatta per la velocità della pagina.
+Il bundle minificato è **33 kB di JS e 5.7 kB di CSS** (13.5 + 1.9 kB gzip)
+contro i 66 kB del file unico di prima — ed è cresciuto di 5 kB con la fase 4,
+non di più, perché registrare è quasi tutto lavoro del browser. È un
+miglioramento reale ma piccolo in assoluto: la build non è stata fatta per la
+velocità della pagina.
 
 ## Licenza
 

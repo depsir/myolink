@@ -30,6 +30,9 @@
     <button id="btnStop" class="danger" disabled>Stop</button>
     <div class="sep"></div>
     <button id="btnAudio"><span class="lg">Microfono</span><span class="sm">Mic</span></button>
+    <div class="sep"></div>
+    <button id="btnRec"><span class="lg">Registra</span><span class="sm">Rec</span></button>
+    <span class="tag rec" id="recInfo"></span>
   </div>
 
   <div class="hrow cfg">
@@ -41,6 +44,13 @@
     <div class="sep"></div>
     <label>Hz <input type="number" id="rate" value="20" min="1" max="2000" step="1"></label>
     <button id="btnRate">Applica</button>
+    <div class="sep"></div>
+    <!-- Quali pannelli finiscono nel video: decidono anche quanto è alto il file. -->
+    <span class="tag">video</span>
+    <label><input type="checkbox" id="recEmg" checked> sensore</label>
+    <label><input type="checkbox" id="recPitch" checked> pitch</label>
+    <label><input type="checkbox" id="recSpec" checked> spettro</label>
+    <button id="btnCsv" title="campioni EMG in CSV: tempo e valore">CSV</button>
     <div class="grow"></div>
   </div>
 </header>
@@ -130,6 +140,10 @@
       Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
       aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
       fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
+      <em>Registra</em> salva un <code>.webm</code> con i pannelli spuntati sotto ⚙ e l'audio del microfono, se
+      è aperto: la sincronia la garantisce il registratore, non serve allineare niente. Mentre registri
+      <strong>non cambiare scheda</strong> — il disegno si ferma e il video prende un fotogramma lunghissimo.
+      <em>CSV</em> esporta i campioni EMG in memoria, l'unico formato con cui una sessione si rianalizza.
     </p>
   </details>
 </main>

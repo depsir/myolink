@@ -18,6 +18,7 @@ import { PAD, resize, cssW, cssH, pitW, pitH, specW, specH } from "./draw/canvas
 import { drawChart, autoY } from "./draw/chart.js";
 import { drawPitch, resetPitchRange } from "./draw/pitch.js";
 import { drawSpec } from "./draw/spec.js";
+import { R, toggleRecord, drawComposite, exportCsv } from "./record/recorder.js";
 import { setupPanels } from "./ui/panels.js";
 import { setupStats, updateStats } from "./ui/stats.js";
 import { $, log } from "./ui/dom.js";
@@ -40,6 +41,8 @@ function draw() {
   if (cssW && cssH) drawChart(ax);
   if (pitW && pitH) drawPitch(ax);
   if (specW && specH) drawSpec(ax);
+  // Dopo i tre pannelli: il canvas di composizione copia fotogrammi già finiti.
+  if (R.on) drawComposite();
   updateStats();
 }
 
@@ -51,6 +54,8 @@ $("btnBle").onclick = connectBle;
 $("btnDemo").onclick = connectDemo;
 $("btnStop").onclick = () => stop("manuale");
 $("btnAudio").onclick = toggleAudio;
+$("btnRec").onclick = toggleRecord;
+$("btnCsv").onclick = exportCsv;
 $("fft").onchange = applyFft;
 $("pauto").onchange = () => {
   const auto = $("pauto").checked;
@@ -77,7 +82,7 @@ $("hintBox").open = window.innerWidth > 720;
 // verifiche del banco di prova (Chrome headless via CDP, vedi README) leggono lo
 // stato interno per controllare timestamp, colonne e stime. Questo è l'unico
 // punto d'accesso: esplicito, così si sa che esiste ed è quello.
-window.MyoLink = { S, T, store, spec, pitch, clock, A, P, PAD };
+window.MyoLink = { S, T, store, spec, pitch, clock, A, P, R, PAD };
 
 resize();
 requestAnimationFrame(draw);

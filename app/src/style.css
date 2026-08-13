@@ -47,6 +47,12 @@ input[type=checkbox] { accent-color: var(--acc); margin: 0; }
 .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .dot.err { background: var(--bad); }
 
+/* Durata e peso del file mentre si registra. È un contatore, non un'etichetta:
+   niente maiuscolette, cifre a larghezza fissa così non balla a ogni secondo.
+   Vuoto quando non si registra, e allora non deve nemmeno occupare il gap. */
+#recInfo { color: var(--bad); font-size: 12px; text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+#recInfo:empty { display: none; }
+
 /* Le due lunghezze di un'etichetta: il CSS sceglie quale, così nessuno script
    deve sapere quanto è largo lo schermo. */
 .sm { display: none; }

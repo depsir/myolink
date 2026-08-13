@@ -232,7 +232,10 @@ export function drawSpec(ax) {
     sctx.textAlign = "right"; sctx.fillText(lbl, PAD.l - 6, yl);
     sctx.textAlign = "left"; sctx.fillText(lbl, specW - PAD.r + 6, yl);
   }
-  sctx.textAlign = "left"; sctx.fillText("Hz", 6, SPAD.t + 5);
+  // Con i margini stretti dello schermo di un telefono la scritta finirebbe
+  // addosso all'etichetta della tacca più alta, e fra le due è quella che porta
+  // meno informazione: un asse con 5k/2k/1k non lo si confonde con altro.
+  if (PAD.l >= 44) { sctx.textAlign = "left"; sctx.fillText("Hz", 6, SPAD.t + 5); }
 
   // La stessa linea sopra lo spettrogramma: deve cadere sulla prima riga
   // armonica. Quando non ci cade, il pitch tracker sta sbagliando e si vede.

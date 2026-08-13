@@ -7,7 +7,7 @@ freddo: qui c'è il perché, cosa si tocca e quando è finita.
 |---|------|-------|
 | 1 | Diagnostica dei permessi (bug Brave mobile) | **fatta** |
 | 2 | Build: sorgenti a moduli, bundle in uscita | **fatta** |
-| 3 | UI mobile | da fare |
+| 3 | UI mobile | **fatta** |
 | 4 | Registrazione video + audio | da fare |
 
 L'ordine non è arbitrario: la 2 viene prima della 3 e della 4 perché entrambe
@@ -169,9 +169,47 @@ tempi non si allineano più e il senso dell'app sparisce. Uno stack verticale lo
 rispetta; qualunque idea di affiancare pannelli su tablet va guardata con questo
 in mente.
 
-**Fatto quando.** Su un telefono in portrait si connette, si apre il microfono,
+**Fatto quando.** ✅ Su un telefono in portrait si connette, si apre il microfono,
 si vedono almeno due pannelli insieme, e si riesce a ridimensionarne uno col
-dito senza che la pagina scrolli.
+dito senza che la pagina scrolli. Misurato a 390×844 con metriche e tocco emulati:
+header 102 px (12% del viewport, contro un terzo), `pEmg` e `pPitch` interi in
+vista, il grip che sposta il bordo di esattamente i pixel trascinati con
+`scrollY` fermo a 0, nessun bersaglio sotto i 40 px. Su 1280×1000 l'header ha gli
+stessi elementi nelle stesse posizioni di prima.
+
+**Com'è venuto.** L'approccio è quello previsto, con cinque cose che vale la pena
+ricordare:
+
+- **`display: contents` invece di due impaginazioni.** Le tre righe dell'header e
+  il contenitore dei controlli di ogni pannello esistono nel DOM ma su desktop
+  *non partecipano al layout*: i figli restano figli del flex dell'header e della
+  barra, cioè esattamente com'erano. Su schermo stretto le stesse scatole
+  diventano righe vere e cassetti. Nessuna duplicazione di markup, e la
+  non-regressione desktop è verificabile confrontando le posizioni.
+- **Due media query, non una.** La prima domanda che il codice fa non è "sono su
+  un telefono" ma "quale risorsa manca": `(max-width: 720px), (max-height: 560px)`
+  nasconde i controlli nei cassetti e passa le altezze a `svh`; solo
+  `(max-width: 720px)` spezza l'header in righe. Il caso che ha imposto la
+  divisione è il telefono coricato — 844×390 prendeva l'impaginazione desktop, e
+  con i bersagli da 40 px l'header andava a **109 px su 390 di altezza**, il 28%
+  dello schermo. Sono 55 px su una riga sola.
+- **`svh` e non `vh` né `dvh`.** `dvh` cambia quando la barra del browser si
+  ritrae: sarebbe un `ResizeObserver` che rialloca tre canvas mentre si scrolla.
+  `svh` è la misura a barre visibili, quindi è stabile.
+- **Il `PAD` è diventato una funzione della larghezza** (52/40 → 34/30 sotto i
+  520 px): su 390 px i margini erano un quarto dello schermo. Il vincolo "stessi
+  margini per i tre pannelli" ne esce più forte di prima, non più debole, perché
+  ora dipende da un solo numero — la larghezza, che i tre canvas hanno identica
+  per costruzione. L'unico effetto collaterale trovato: la scritta `Hz` dello
+  spettrogramma andava addosso all'etichetta della tacca più alta, e con margini
+  stretti si omette (un asse con 5k/2k/1k non si confonde con altro).
+- **Il grip era due righe di CSS**, come previsto: 22 px di area utile con la riga
+  disegnata sottile, e `touch-action: none` — che è la riga che impedisce alla
+  pagina di scrollare sotto il dito. In più `pointercancel`, che mancava: col dito
+  il sistema può revocare il puntatore e il ridimensionamento restava attaccato.
+
+**Aperto.** Nessuna prova su un telefono vero: l'emulazione dà metriche ed eventi
+di tocco veri, non la barra del browser che si ritrae né la latenza del dito.
 
 ---
 

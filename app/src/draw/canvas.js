@@ -18,6 +18,17 @@ export let dpr = 1, cssW = 0, cssH = 0, pitW = 0, pitH = 0, specW = 0, specH = 0
 // margine destro è largo quanto quello sinistro perché ci stanno le stesse
 // etichette: sul bordo destro c'è l'ADESSO, ed è lì che si guarda dal vivo.
 export const PAD = { l: 52, r: 40, t: 10, b: 22 };
+
+// Su 390px di larghezza quei 92px di margini sono un quarto dello schermo. Le
+// etichette che ci stanno dentro sono al massimo quattro cifre ("4095") o un nome
+// di nota ("A#4"), e a 10px monospace ci stanno anche in meno. Stringerli dipende
+// SOLO dalla larghezza, che i tre canvas hanno identica: l'allineamento degli
+// assi dei tempi resta garantito per costruzione, non per disciplina.
+function setPad(w) {
+  const narrow = w > 0 && w < 520;
+  PAD.l = narrow ? 34 : 52;
+  PAD.r = narrow ? 30 : 40;
+}
 export const SPAD = { t: 10, b: 10 };
 export const PPAD = { t: 10, b: 16 };                // b: ci sta la striscia di clarity
 
@@ -32,6 +43,9 @@ function fit(c, cx) {
 
 export function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
+  // Un pannello compresso o nascosto misura 0: la larghezza vera è quella del
+  // più largo dei tre.
+  setPad(Math.max(cv.clientWidth, pitCv.clientWidth, specCv.clientWidth));
   [cssW, cssH] = fit(cv, ctx);
   [pitW, pitH] = fit(pitCv, pctx);
   [specW, specH] = fit(specCv, sctx);

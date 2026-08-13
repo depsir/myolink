@@ -14,7 +14,7 @@ import { connectBle } from "./transport/ble.js";
 import { connectDemo } from "./transport/sim.js";
 import { A, applyFft, toggleAudio } from "./audio/audio.js";
 import { P } from "./audio/pitch.js";
-import { resize, cssW, cssH, pitW, pitH, specW, specH } from "./draw/canvas.js";
+import { PAD, resize, cssW, cssH, pitW, pitH, specW, specH } from "./draw/canvas.js";
 import { drawChart, autoY } from "./draw/chart.js";
 import { drawPitch, resetPitchRange } from "./draw/pitch.js";
 import { drawSpec } from "./draw/spec.js";
@@ -63,11 +63,21 @@ $("btnRate").onclick = () => {
 };
 $("btnAuto").onclick = autoY;
 
+// ---- schermo stretto: due interruttori e una nota che si può chiudere ----
+// Le classi le interpreta solo il CSS dentro la media query: su desktop questi
+// handler restano collegati a elementi che non sono visibili.
+$("btnCfg").onclick = () =>
+  $("btnCfg").setAttribute("aria-expanded", $("hdr").classList.toggle("open"));
+$("btnRotate").onclick = () => document.body.classList.add("norotate");
+// Su desktop la nota resta aperta com'era; su un telefono sarebbe mezzo schermo
+// di testo sotto ai grafici, quindi parte chiusa.
+$("hintBox").open = window.innerWidth > 720;
+
 // Con un modulo ES le variabili di primo livello non sono più globali, e le
 // verifiche del banco di prova (Chrome headless via CDP, vedi README) leggono lo
 // stato interno per controllare timestamp, colonne e stime. Questo è l'unico
 // punto d'accesso: esplicito, così si sa che esiste ed è quello.
-window.MyoLink = { S, T, store, spec, pitch, clock, A, P };
+window.MyoLink = { S, T, store, spec, pitch, clock, A, P, PAD };
 
 resize();
 requestAnimationFrame(draw);

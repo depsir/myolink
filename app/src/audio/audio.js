@@ -12,7 +12,7 @@ import { spec, pitch, T } from "../core/state.js";
 import { P, PITCH_FFT, PITCH_HOP, setupYin, yin } from "./pitch.js";
 import { logFail, micPermission, MIC_HINT } from "../core/diagnostics.js";
 import { resize } from "../draw/canvas.js";
-import { $, log } from "../ui/dom.js";
+import { $, log, setLabel } from "../ui/dom.js";
 
 export const DB_MIN = -110, DB_MAX = 0;
 
@@ -73,7 +73,7 @@ export async function toggleAudio() {
     applyFft();
     $("pSpec").hidden = $("pPitch").hidden = false;
     resize();
-    $("btnAudio").textContent = "Chiudi microfono";
+    setLabel($("btnAudio"), "Chiudi microfono", "Chiudi mic");
     $("btnAudio").classList.add("danger");
     log("microfono aperto: " + (A.sampleRate / 1000).toFixed(1) + " kHz");
   } catch (e) {
@@ -97,7 +97,7 @@ function releaseAudio() {
 export function closeAudio(reason) {
   releaseAudio();
   // Il pannello resta visibile: quello che è stato acquisito si può ancora guardare.
-  $("btnAudio").textContent = "Microfono";
+  setLabel($("btnAudio"), "Microfono", "Mic");
   $("btnAudio").classList.remove("danger");
   log("microfono chiuso" + (reason && reason !== "manuale" ? " (" + reason + ")" : ""));
 }

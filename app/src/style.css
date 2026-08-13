@@ -8,11 +8,20 @@ body {
   margin: 0; background: var(--bg); color: var(--fg);
   font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
+/* Il pitch e lo spettrogramma nascono `hidden`: nessuna regola di layout deve
+   poter vincere su quell'attributo, altrimenti appaiono vuoti prima del microfono. */
+[hidden] { display: none !important; }
+
 header {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 10px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
 }
+/* Le tre righe dell'header esistono per il mobile: qui non devono contare,
+   e `contents` le fa sparire dal layout lasciando i figli nel flex dell'header.
+   Lo stato va per ultimo, che è il posto che aveva quando era in fondo al DOM. */
+header .hrow { display: contents; }
+#status { order: 1; }
 h1 { font-size: 14px; margin: 0 10px 0 0; font-weight: 600; letter-spacing: .2px; }
 button {
   background: #21262d; color: var(--fg); border: 1px solid var(--line);
@@ -38,7 +47,21 @@ input[type=checkbox] { accent-color: var(--acc); margin: 0; }
 .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .dot.err { background: var(--bad); }
 
+/* Le due lunghezze di un'etichetta: il CSS sceglie quale, così nessuno script
+   deve sapere quanto è largo lo schermo. */
+.sm { display: none; }
+/* ⚙ dell'header e delle barre: esistono solo dove i controlli si nascondono. */
+#btnCfg, .panel .tools { display: none; }
+#btnCfg::before, .panel .tools::before { content: "\2699"; }
+
 main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+.rotate {
+  display: none; margin: 0; gap: 10px; align-items: center;
+  background: #12202f; border: 1px solid #1f3b57; border-left: 3px solid var(--acc);
+  border-radius: 8px; padding: 8px 10px; color: var(--fg); font-size: 12.5px;
+}
+.rotate .x { margin-left: auto; padding: 2px 8px; background: none; border: 0; color: var(--dim); font-size: 18px; }
 
 /* I pannelli condividono l'asse X, quindi possono cambiare altezza e sparire,
    mai larghezza: l'allineamento verticale nel tempo resta valido comunque. */
@@ -50,16 +73,27 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
   display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
   padding: 7px 10px; background: var(--panel); border-bottom: 1px solid var(--line);
 }
+/* Come le righe dell'header: su desktop il contenitore dei controlli non esiste. */
+.panel .ctl { display: contents; }
 .panel.folded .bar { border-bottom: 0; }
 .panel.folded .body, .panel.folded .grip { display: none; }
-.panel .body { position: relative; height: 380px; }
+.panel .body { position: relative; }
+/* Le altezze stanno qui e non in `style=` sull'elemento: uno stile inline
+   vincerebbe su qualunque media query. Il grip continua a scriverle inline —
+   ma quella è una scelta dell'utente, e deve vincere. */
+#pEmg .body { height: 380px; }
+#pPitch .body { height: 190px; }
+#pSpec .body { height: 320px; }
 canvas { display: block; width: 100%; height: 100%; }
 .bar .tag { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
 .bar input[type=number] { width: 60px; }
 .fold { width: 22px; padding: 3px 0; line-height: 1; font-size: 10px; text-align: center; }
 .panel.folded .fold::before { content: "\25B8"; }    /* ▸ chiuso */
 .fold::before { content: "\25BE"; }                   /* ▾ aperto */
-.grip { height: 7px; cursor: ns-resize; background: var(--panel); border-top: 1px solid var(--line); }
+/* `touch-action: none` anche su desktop: è quello che impedisce al browser di
+   interpretare il trascinamento come uno scroll della pagina, ed è l'unica
+   ragione per cui il ridimensionamento col dito funziona. */
+.grip { height: 7px; cursor: ns-resize; background: var(--panel); border-top: 1px solid var(--line); touch-action: none; }
 .grip::after {
   content: ""; display: block; width: 38px; height: 2px;
   margin: 2.5px auto; border-radius: 1px; background: #3d444d;
@@ -82,4 +116,92 @@ canvas { display: block; width: 100%; height: 100%; }
   color: var(--dim); white-space: pre-wrap;
 }
 .hint { color: var(--dim); font-size: 12px; }
+.hint p { margin: 6px 0 0; }
+.hint summary { cursor: pointer; }
 .hint code { background: var(--panel); padding: 1px 5px; border-radius: 4px; color: var(--fg); }
+
+/* ============================== tocco ==============================
+   Vale per larghezza ridotta ma anche per un tablet largo: il dito è lo stesso.
+   40px è il minimo con cui un pollice prende un bersaglio senza guardarlo. */
+@media (max-width: 720px), (pointer: coarse) {
+  button { min-height: 40px; padding: 8px 14px; }
+  .fold, .panel .tools { min-height: 40px; min-width: 40px; width: auto; font-size: 13px; }
+  input[type=number], input[type=text], select { min-height: 40px; padding: 6px 8px; font-size: 16px; }
+  input[type=number], input[type=text] { width: 5.6em; }
+  .bar input[type=number], .bar input[type=text] { width: 4.6em; }
+  input[type=checkbox] { width: 20px; height: 20px; }
+  label { gap: 7px; }
+  /* Il grip cresce a 22px: la riga disegnata resta sottile, quello che cambia è
+     l'area che prende il dito. */
+  .grip { height: 22px; }
+  .grip::after { width: 56px; height: 3px; margin: 9.5px auto; }
+}
+
+/* ============================== cassetti ==============================
+   Dove il viewport è poco — stretto O basso — i controlli spariscono dietro un
+   ⚙ e le altezze passano a frazioni di viewport. Il telefono in landscape è
+   844x390: largo per l'impaginazione desktop, ma con 390px di altezza dove i
+   380px del grafico erano tutto lo schermo, e con un header a tre righe che se
+   ne mangiava il 28%. Serve anche lì, non solo in portrait. */
+@media (max-width: 720px), (max-height: 560px) {
+  header { padding: 7px 10px; gap: 7px; }
+  #btnCfg { display: inline-block; order: 1; }
+  /* Le impostazioni: chiuse, e quando si aprono prendono una riga tutta loro. */
+  .hrow.cfg { display: none; }
+  #hdr.open .hrow.cfg { display: flex; flex: 0 0 100%; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .sep, .grow { display: none; }
+  .lg { display: none; }
+  .sm { display: inline; }
+  /* Un filo più stretti dei 14px del blocco qui sopra: è quello che fa stare i
+     quattro pulsanti di connessione più il microfono su una riga sola a 390px. */
+  button { padding: 8px 10px; }
+
+  main { padding: 8px; gap: 8px; }
+
+  /* Altezze in frazioni di viewport: in px si vedrebbe un pannello e mezzo.
+     `svh` e non `vh`/`dvh`: è la misura col browser a barre visibili, quindi non
+     cambia mentre si scrolla e non fa ricalcolare i canvas a ogni pixel. */
+  #pEmg .body { height: 30vh; height: 30svh; }
+  #pPitch .body { height: 21vh; height: 21svh; }
+  #pSpec .body { height: 27vh; height: 27svh; }
+
+  .panel .bar { padding: 5px 8px; gap: 6px 8px; }
+  .panel .tools { display: inline-block; margin-left: auto; }
+  /* Il cassetto del pannello: `flex: 0 0 100%` lo manda a capo dentro la barra,
+     senza spostare niente nel DOM. Sta DOPO il pulsante ⚙, che così resta
+     sulla prima riga. */
+  .panel .ctl { display: none; }
+  .panel.open .ctl { display: flex; flex: 0 0 100%; flex-wrap: wrap; gap: 8px 10px; }
+
+  #stats { grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
+  .stat .v { font-size: 15px; }
+  #log { height: 88px; }
+}
+
+/* ============================== schermo stretto ==============================
+   Solo qui l'header si spezza in righe: a 844px di larghezza (il telefono
+   coricato) i pulsanti ci stanno tutti in fila, e spezzarli sarebbe un'altra
+   riga rubata a un'altezza che è già la risorsa scarsa. */
+@media (max-width: 720px) {
+  header .hrow { display: flex; flex: 0 0 100%; flex-wrap: wrap; gap: 7px; align-items: center; }
+  /* prima riga: nome, stato, ⚙ ai due estremi */
+  .hrow.top { justify-content: space-between; }
+  #status { order: 0; }
+}
+
+/* Il suggerimento di ruotare vale per un telefono in portrait, non per una
+   finestra desktop stretta: da lì `pointer: coarse` fa la differenza. */
+@media (max-width: 720px) and (orientation: portrait) and (pointer: coarse) {
+  .rotate { display: flex; }
+  body.norotate .rotate { display: none; }
+}
+
+/* Sotto i 560px di altezza il contorno di un pannello (barra 52 + grip 22) pesa
+   quanto il grafico: con le frazioni del portrait il secondo pannello resta
+   fuori di una trentina di pixel, ed è proprio il confronto sensore/pitch che
+   si vuole vedere. Chi vuole un grafico più alto tira il grip. */
+@media (max-height: 560px) {
+  #pEmg .body { height: 24vh; height: 24svh; }
+  #pPitch .body { height: 18vh; height: 18svh; }
+  #pSpec .body { height: 22vh; height: 22svh; }
+}

@@ -13,35 +13,60 @@
 </head>
 <body>
 
-<header>
-  <h1>MyoLink</h1>
-  <button id="btnSerial" class="primary">Collega seriale</button>
-  <button id="btnBle" class="primary">Collega BLE</button>
-  <button id="btnDemo">Simulatore</button>
-  <button id="btnStop" class="danger" disabled>Stop</button>
-  <div class="sep"></div>
-  <button id="btnAudio">Microfono</button>
-  <!-- vale per entrambi i pannelli audio: sono timbrati dallo stesso orologio -->
-  <label>offset <input type="number" id="aoff" value="0" step="5"> ms</label>
-  <div class="sep"></div>
-  <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
-  <div class="sep"></div>
-  <label>Hz <input type="number" id="rate" value="20" min="1" max="2000" step="1"></label>
-  <button id="btnRate">Applica</button>
-  <div class="grow"></div>
-  <span id="status"><span class="dot" id="dot"></span>disconnesso</span>
+<!-- L'header è diviso in tre righe LOGICHE: su desktop sono `display: contents`,
+     cioè spariscono e i pulsanti tornano a essere una riga sola come prima; su
+     schermo stretto diventano righe vere e la terza si nasconde dietro ⚙. -->
+<header id="hdr">
+  <div class="hrow top">
+    <h1>MyoLink</h1>
+    <button id="btnCfg" class="icon" aria-expanded="false" aria-label="impostazioni"></button>
+    <span id="status"><span class="dot" id="dot"></span>disconnesso</span>
+  </div>
+
+  <div class="hrow conn">
+    <button id="btnSerial" class="primary"><span class="lg">Collega seriale</span><span class="sm">Seriale</span></button>
+    <button id="btnBle" class="primary"><span class="lg">Collega BLE</span><span class="sm">BLE</span></button>
+    <button id="btnDemo"><span class="lg">Simulatore</span><span class="sm">Demo</span></button>
+    <button id="btnStop" class="danger" disabled>Stop</button>
+    <div class="sep"></div>
+    <button id="btnAudio"><span class="lg">Microfono</span><span class="sm">Mic</span></button>
+  </div>
+
+  <div class="hrow cfg">
+    <div class="sep"></div>
+    <!-- vale per entrambi i pannelli audio: sono timbrati dallo stesso orologio -->
+    <label>offset <input type="number" id="aoff" value="0" step="5"> ms</label>
+    <div class="sep"></div>
+    <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
+    <div class="sep"></div>
+    <label>Hz <input type="number" id="rate" value="20" min="1" max="2000" step="1"></label>
+    <button id="btnRate">Applica</button>
+    <div class="grow"></div>
+  </div>
 </header>
 
 <main>
+  <!-- Solo in portrait su schermo stretto: 390 px di larghezza per 5 secondi di
+       storia sono 78 pixel al secondo, in landscape più del doppio. -->
+  <p class="rotate" id="rotate">
+    Ruota il telefono: in orizzontale l'asse dei tempi ha più del doppio dei pixel.
+    <button id="btnRotate" class="x" aria-label="chiudi">×</button>
+  </p>
+
   <!-- I tre pannelli condividono l'asse dei tempi: identici PAD.l/PAD.r e finestra.
-       Il pitch sta in mezzo perché è quello che si confronta a occhio col sensore. -->
+       Il pitch sta in mezzo perché è quello che si confronta a occhio col sensore.
+       In ogni barra i controlli stanno in un .ctl: su desktop è trasparente, su
+       schermo stretto è il cassetto che si apre col pulsante ⚙. -->
   <section class="panel" id="pEmg">
     <div class="bar">
       <button class="fold" title="comprimi"></button>
       <span class="tag">sensore</span>
-      <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
-      <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
-      <button id="btnAuto">Auto Y</button>
+      <button class="tools" aria-expanded="false" aria-label="controlli"></button>
+      <div class="ctl">
+        <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
+        <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
+        <button id="btnAuto">Auto Y</button>
+      </div>
     </div>
     <div class="body"><canvas id="chart"></canvas></div>
     <div class="grip"></div>
@@ -51,14 +76,17 @@
     <div class="bar">
       <button class="fold" title="comprimi"></button>
       <span class="tag">pitch</span>
-      <label>clarity ≥ <input type="number" id="pthr" value="0.80" min="0" max="1" step="0.05"></label>
-      <label><input type="checkbox" id="pauto" checked> auto Y</label>
-      <label>da <input type="text" id="plo" value="C2" size="3" disabled>
-             a <input type="text" id="phi" value="C6" size="3" disabled></label>
-      <label><input type="checkbox" id="povl"> anche sullo spettrogramma</label>
-      <span class="tag" id="pitchInfo"></span>
+      <button class="tools" aria-expanded="false" aria-label="controlli"></button>
+      <div class="ctl">
+        <label>clarity ≥ <input type="number" id="pthr" value="0.80" min="0" max="1" step="0.05"></label>
+        <label><input type="checkbox" id="pauto" checked> auto Y</label>
+        <label>da <input type="text" id="plo" value="C2" size="3" disabled>
+               a <input type="text" id="phi" value="C6" size="3" disabled></label>
+        <label><input type="checkbox" id="povl"> anche sullo spettrogramma</label>
+        <span class="tag" id="pitchInfo"></span>
+      </div>
     </div>
-    <div class="body" style="height:190px"><canvas id="pitchCv"></canvas></div>
+    <div class="body"><canvas id="pitchCv"></canvas></div>
     <div class="grip"></div>
   </section>
 
@@ -66,38 +94,44 @@
     <div class="bar">
       <button class="fold" title="comprimi"></button>
       <span class="tag">spettrogramma</span>
-      <label>fino a <input type="number" id="fmax" value="5" min="0.1" step="0.5"> kHz</label>
-      <label><input type="checkbox" id="flog" checked> log</label>
-      <label>dB <input type="number" id="dblo" value="-85" step="5"> – <input type="number" id="dbhi" value="-25" step="5"></label>
-      <label>FFT <select id="fft">
-        <option value="512">512</option>
-        <option value="1024">1024</option>
-        <option value="2048">2048</option>
-        <option value="4096">4096</option>
-        <option value="8192" selected>8192</option>
-        <option value="16384">16384</option>
-        <option value="32768">32768</option>
-      </select></label>
-      <span class="tag" id="specInfo"></span>
+      <button class="tools" aria-expanded="false" aria-label="controlli"></button>
+      <div class="ctl">
+        <label>fino a <input type="number" id="fmax" value="5" min="0.1" step="0.5"> kHz</label>
+        <label><input type="checkbox" id="flog" checked> log</label>
+        <label>dB <input type="number" id="dblo" value="-85" step="5"> – <input type="number" id="dbhi" value="-25" step="5"></label>
+        <label>FFT <select id="fft">
+          <option value="512">512</option>
+          <option value="1024">1024</option>
+          <option value="2048">2048</option>
+          <option value="4096">4096</option>
+          <option value="8192" selected>8192</option>
+          <option value="16384">16384</option>
+          <option value="32768">32768</option>
+        </select></label>
+        <span class="tag" id="specInfo"></span>
+      </div>
     </div>
-    <div class="body" style="height:320px"><canvas id="spec"></canvas></div>
+    <div class="body"><canvas id="spec"></canvas></div>
     <div class="grip"></div>
   </section>
 
   <div id="stats"></div>
   <div id="log"></div>
-  <p class="hint">
-    Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
-    <code>http://localhost</code> — non <code>file://</code>. In locale: <code>npm run dev</code>.
-    Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
-    Se qualcosa non parte, la prima riga del log dice quali API ci sono e in che stato è il permesso del
-    microfono; quando una richiesta fallisce, sotto l'errore compare dove guardare.
-    <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
-    un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.
-    Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
-    aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
-    fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
-  </p>
+  <details class="hint" id="hintBox">
+    <summary>Requisiti, limiti e come si legge</summary>
+    <p>
+      Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
+      <code>http://localhost</code> — non <code>file://</code>. In locale: <code>npm run dev</code>.
+      Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
+      Se qualcosa non parte, la prima riga del log dice quali API ci sono e in che stato è il permesso del
+      microfono; quando una richiesta fallisce, sotto l'errore compare dove guardare.
+      <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
+      un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.
+      Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
+      aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
+      fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
+    </p>
+  </details>
 </main>
 
 <script type="module" src="/src/main.js"></script>

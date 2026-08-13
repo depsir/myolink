@@ -103,6 +103,28 @@ spettrogramma, ma vale la pena saperlo prima di fidarsi di una misura fine.
 che lo **comprime**; il bordo inferiore si trascina per **ridimensionarlo**. La
 larghezza no: è quella che tiene allineati gli assi dei tempi.
 
+**Su un telefono.** Stessa pagina e stesso codice di disegno: cambia
+l'impaginazione, con due media query e nessuna versione mobile separata.
+
+- I controlli si spostano in **cassetti**: il ⚙ dell'header apre offset,
+  finestra e Hz; il ⚙ di ogni pannello apre i suoi. In barra restano il nome, la
+  freccia di piega e lo stato della connessione, cioè quello che si guarda
+  mentre si registra.
+- Le **altezze** passano da px a frazioni di `svh` — la misura del viewport col
+  browser a barre visibili, che non cambia mentre si scrolla e quindi non fa
+  ricalcolare i canvas a ogni pixel. In portrait si vedono due pannelli interi.
+- Il **grip** di ridimensionamento passa da 7 a 22 px di area utile (la riga
+  disegnata resta sottile) e ha `touch-action: none`, che è ciò che impedisce al
+  browser di leggere il trascinamento come uno scroll della pagina.
+- I **margini degli assi** si stringono da 52/40 a 34/30 px sotto i 520 px di
+  larghezza: su 390 px erano un quarto dello schermo. Dipendono solo dalla
+  larghezza, che i tre canvas hanno identica, quindi l'allineamento dei tempi
+  resta garantito per costruzione.
+- Il **telefono coricato** è il caso meno ovvio: 844×390 è largo abbastanza per
+  l'impaginazione desktop ma alto la metà di un pannello, e con i bersagli da 40
+  px l'header andava a tre righe. I cassetti valgono quindi anche a `max-height`,
+  le righe dell'header solo a `max-width`.
+
 ## Seriale o BLE: lo decide lo sketch
 
 Niente jumper e niente riflash: `firmware/myoware` tiene su entrambi i trasporti
@@ -409,6 +431,22 @@ Verificato:
   larghezza, stop pulito, zero eccezioni JS.
 - Pannelli: piega, ripiega e ridimensionamento (190 → 300 px → compresso a 0)
   senza errori JS e senza toccare la larghezza, quindi gli assi restano allineati.
+- UI mobile, misurata in Chrome headless con metriche e tocco emulati:
+  - **390×844** (telefono in portrait): header **102 px**, il 12% del viewport
+    contro il terzo di prima, con i cinque pulsanti su una riga sola; **due
+    pannelli interi** in vista senza scrollare; nessun bersaglio tattile sotto i
+    **40 px** (input compresi, che prima erano 4 px di padding); i cassetti si
+    aprono e i controlli dentro sono raggiungibili;
+  - **grip col dito**: `Input.dispatchTouchEvent` sul bordo inferiore
+    ridimensiona il pannello di esattamente i pixel trascinati (253 → 343) e
+    `window.scrollY` resta **0**, cioè la pagina non scrolla sotto il dito;
+  - **844×390** (telefono coricato): header **55 px** su una riga, due pannelli
+    interi in vista;
+  - i tre canvas hanno la **stessa larghezza** in tutte le viewport provate, e il
+    `PAD` stretto non rompe niente: 440 Hz resta A4 a +1 cent, zero eccezioni;
+  - **1280×1000**: l'header ha gli stessi elementi nelle stesse posizioni di
+    prima (lo stato in fondo a destra), altezze 380/190/320 px, `PAD` 52/40 —
+    il desktop non si è accorto di niente.
 
 Nota sul banco di prova: il dispositivo audio finto di Chrome emette silenzio più
 **click a fondo scala**, che sono impulsi a banda larga e da soli fanno sbagliare
@@ -416,7 +454,9 @@ l'ottava a YIN. Vanno scollegati (`A.src.disconnect()`) prima di iniettare il
 tono, altrimenti si misura il rumore del banco. `--use-file-for-fake-audio-capture`
 non inietta nulla in headless: la traccia resta a −120 dBFS.
 
-Non ancora provato su hardware, e il pitch non ancora provato su voce vera.
+Non ancora provato su hardware, e il pitch non ancora provato su voce vera. La UI
+mobile è misurata su un telefono **emulato**: le metriche e gli eventi di tocco
+sono quelli veri, la barra del browser che si ritrae e la latenza del dito no.
 
 Nota: il pulsante *Simulatore* genera valori 300–2100, fuori dalla Y di default
 (0–1000), quindi la traccia esce dall'inquadratura. È così da prima; *Auto Y*
@@ -439,7 +479,9 @@ indipendenti e ripartibili a freddo:
 2. **Build** — fatta: sorgenti a moduli ES e 35 test unitari, bundle con Vite.
    Non per velocità (66 KB in un file erano già l'ottimo), ma per i test sulle
    parti numeriche e per poter usare dipendenze npm.
-3. **UI mobile** — stessa pagina con un breakpoint, non una versione separata.
+3. **UI mobile** — fatta: controlli nei cassetti, altezze in `svh`, grip da
+   prendere col dito, margini degli assi stretti. Stessa pagina, due media query,
+   nessuna riga di codice di disegno cambiata.
 4. **Registrazione video + audio** — canvas di composizione e `MediaRecorder`,
    con la sincronia A/V garantita dal recorder. Solo esportazione: niente
    riapertura di sessione.

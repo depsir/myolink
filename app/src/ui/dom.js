@@ -3,6 +3,19 @@
 
 export function $(id) { return document.getElementById(id); }
 
+// Un'etichetta di pulsante in due lunghezze: su 390px il testo lungo manda la
+// riga dei pulsanti a capo. Le due varianti stanno entrambe nel DOM e a scegliere
+// è il CSS, così nessuno qui deve sapere quanto è largo lo schermo.
+export function setLabel(el, long, short) {
+  el.textContent = "";
+  for (const [cls, txt] of [["lg", long], ["sm", short]]) {
+    const s = document.createElement("span");
+    s.className = cls;
+    s.textContent = txt;
+    el.appendChild(s);
+  }
+}
+
 // L'elemento si cerca alla prima chiamata, non al caricamento del modulo: così
 // il resto del codice resta importabile anche senza DOM (i test girano in node).
 let logEl;

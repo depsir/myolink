@@ -14,10 +14,10 @@
 // Ambito: solo esportazione. Nessuna riapertura di sessione, nessuna timeline.
 
 import { store } from "../core/state.js";
-import { A } from "../audio/audio.js";
-import { cv, pitCv, specCv } from "../draw/canvas.js";
+import { busLive, closeBus, openBus } from "../audio/bus.js";
+import { cv, dpr, pitCv, specCv } from "../draw/canvas.js";
 import { composeLayout } from "./layout.js";
-import { emgCsv, extFor, pickMime, stampName } from "./export.js";
+import { emgCsv, extFor, stampName, supportedMimes, videoBitrate } from "./export.js";
 import { $, log, setLabel } from "../ui/dom.js";
 
 const FPS = 30;
@@ -38,8 +38,14 @@ export const R = {
   get on() { return !!this.rec; },
 };
 
-export function toggleRecord() {
+// L'avvio ha un'attesa dentro (il bus audio che parte), e in quella finestra il
+// pulsante è ancora premibile: senza questo, due clic aprirebbero due
+// registrazioni sullo stesso canvas.
+let starting = false;
+
+export async function toggleRecord() {
   if (R.on) return R.rec.stop();          // il resto lo fa onstop
+  if (starting) return;
   if (typeof MediaRecorder === "undefined") {
     return log("registrazione: MediaRecorder non disponibile in questo browser.");
   }
@@ -60,29 +66,41 @@ export function toggleRecord() {
   // inventarsi cosa c'è dietro.
   const cx = out.getContext("2d", { alpha: false });
 
+  // Il controllo dei formati si fa qui — prima di aprire il bus — solo per non
+  // accendere il microfono a vuoto quando non c'è niente da negoziare; la scelta
+  // vera avviene dopo, provando a costruire (vedi buildRecorder).
+  const mimes = supportedMimes((t) => MediaRecorder.isTypeSupported(t));
+  if (!mimes.length) return log("registrazione: nessun formato supportato dal browser.");
+
+  // La traccia audio è sempre quella del bus, mai quella del microfono: il bus
+  // esiste per tutta la registrazione e il microfono si aggancia al suo grafo
+  // quando c'è. Così premere Registra prima di aprire il microfono non produce
+  // più un file muto — vedi audio/bus.js.
+  //
+  // Si aspetta che il bus stia davvero emettendo PRIMA di catturare il video e
+  // di far partire il recorder: le due tracce devono cominciare insieme, o la
+  // sincronia se ne va (il perché dell'attesa sta in bus.js).
+  let audio;
+  starting = true;
+  // finally e non due assegnamenti: se l'apertura del bus salta, il pulsante deve
+  // restare premibile invece di bloccarsi in "sto partendo".
+  try { audio = await openBus(); } finally { starting = false; }
+
   const tracks = out.captureStream(FPS).getVideoTracks();
-  // La decisione sull'audio si prende QUI: una traccia aggiunta a registrazione
-  // avviata non entrerebbe nel file. Microfono chiuso = video muto, e lo diciamo.
-  const mic = A.on ? A.stream?.getAudioTracks()[0] : null;
-  if (mic) tracks.push(mic);
+  if (audio) tracks.push(audio);
 
-  const mime = pickMime((t) => MediaRecorder.isTypeSupported(t));
-  if (!mime) return log("registrazione: nessun formato supportato dal browser.");
-
-  let rec;
-  try {
-    rec = new MediaRecorder(new MediaStream(tracks), {
-      mimeType: mime,
-      // ~0.12 bit per pixel per fotogramma: il contenuto è grafica vettoriale su
-      // fondo scuro, dove i bitrate da fotocamera sono soldi buttati. Lo
-      // spettrogramma è l'unico strato che sporca davvero, e sta nei limiti.
-      videoBitsPerSecond: Math.round(Math.min(12e6, Math.max(2e6, L.w * L.h * FPS * 0.12))),
-    });
-  } catch (e) {
-    return log("registrazione: " + (e?.name || "errore") + " — " + (e?.message || mime));
+  const vbr = videoBitrate(L.w, L.h, FPS);
+  const { rec, mime, err } = buildRecorder(new MediaStream(tracks), mimes, vbr);
+  if (!rec) {
+    closeBus();
+    return log("registrazione: " + (err?.name || "errore") + " — " + (err?.message || mimes[0]));
   }
 
   Object.assign(R, {
+    // Qui `mime` è quello CHIESTO, ed è giusto così: appena costruito il recorder
+    // `rec.mimeType` non dice ancora niente di nuovo (rieccheggia la richiesta),
+    // perché il livello del profilo lo rinegozia quando l'encoder parte davvero.
+    // Il valore vero si legge alla chiusura — vedi save().
     rec, mime, chunks: [], bytes: 0, t0: performance.now(),
     out, cx, rects: L.rects,
     src: Object.fromEntries(LAYERS.map((l) => [l.key, l.cv])),
@@ -102,8 +120,45 @@ export function toggleRecord() {
   setLabel($("btnRec"), "Ferma e salva", "Stop");
   $("btnRec").classList.add("danger");
   showInfo();
-  log(`registrazione avviata: ${L.w}×${L.h}, ${mime}` + (mic ? " (con audio)" : " (senza audio: microfono chiuso)"));
+  // Il bitrate lo si rilegge dal recorder invece di ristampare quello chiesto:
+  // `videoBitsPerSecond` è un desiderio, e sapere cosa il browser ha accettato
+  // davvero è l'unico modo di capire un file venuto male senza indovinare.
+  // Il MIME è quello chiesto e non il negoziato, che a questo punto è la stessa
+  // stringa: il livello vero si sa solo a encoder partito, e lo stampa save().
+  const got = Math.round((rec.videoBitsPerSecond || vbr) / 1e5) / 10;
+  log(`registrazione avviata: ${L.w}×${L.h}, ${got} Mb/s, ${mime}` + audioNote(audio));
+  // La risoluzione del file non è una scelta della registrazione: è quella a cui
+  // l'app sta disegnando, cioè pixel CSS per dpr. Su un monitor non-Retina sono
+  // metà per lato — un quarto dei pixel — e nessun bitrate lo recupera, quindi
+  // conviene dirlo qui e non lasciarlo scoprire riguardando il file.
+  if (dpr < 2) {
+    log(`   → dpr ${dpr}: si registra a risoluzione CSS. Su uno schermo Retina lo stesso video esce col doppio dei pixel per lato.`);
+  }
   log("   → non cambiare scheda: il disegno si ferma e il video prende un fotogramma lunghissimo.");
+}
+
+// Il primo formato che il browser dichiara di sapere fare non è detto che sappia
+// anche costruire: chiediamo il profilo H.264 High, e dove l'encoder è software
+// (OpenH264 fa solo baseline) il sì di `isTypeSupported` diventa un'eccezione
+// proprio qui. Si scende lungo la lista invece di rinunciare — un file in
+// baseline è comunque meglio di nessun file — e si tiene l'ULTIMO errore, che è
+// quello del candidato meno ambizioso e quindi il più informativo sul perché
+// nemmeno lui è passato.
+function buildRecorder(stream, mimes, vbr) {
+  let err = null;
+  for (const mime of mimes) {
+    try {
+      return { rec: new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: vbr }), mime };
+    } catch (e) { err = e; }
+  }
+  return { err };
+}
+
+// Il microfono chiuso non è più un file muto per sempre, e la riga di log deve
+// dire quale dei tre casi è: si sente, si sentirà appena apri, non si sentirà mai.
+function audioNote(track) {
+  if (!track) return " (senza audio: Web Audio non disponibile)";
+  return busLive() ? " (con audio)" : " (muto per ora: apri il microfono e l'audio entra da lì in avanti)";
 }
 
 // Chiamata dal ciclo di disegno di main.js DOPO i tre pannelli, così compone
@@ -127,8 +182,18 @@ export function drawComposite() {
 
 function save() {
   const secs = (performance.now() - R.t0) / 1000;
-  const blob = new Blob(R.chunks, { type: R.mime });
-  const name = stampName("myolink", extFor(R.mime));
+  // Adesso — e non all'avvio — `rec.mimeType` dice cosa c'è davvero nei chunk: il
+  // livello del profilo H.264 il browser lo rinegozia quando l'encoder parte
+  // (chiesto `640028`, nel file `640020`), e il blob deve dichiarare il
+  // contenuto, non l'intenzione. Va letto PRIMA che il reset azzeri R.rec.
+  const mime = R.rec?.mimeType || R.mime;
+  const blob = new Blob(R.chunks, { type: mime });
+  const name = stampName("myolink", extFor(mime));
+
+  // Qui i dati sono già stati consegnati (onstop arriva dopo l'ultimo
+  // ondataavailable), quindi il bus si può spegnere: il microfono, se aperto,
+  // resta aperto e la prossima registrazione se lo ritrova.
+  closeBus();
 
   R.rec = null; R.chunks = []; R.cx = R.out = null; R.rects = [];
   setLabel($("btnRec"), "Registra", "Rec");
@@ -137,7 +202,11 @@ function save() {
 
   if (!blob.size) return log("registrazione: nessun dato, niente da salvare.");
   saveBlob(blob, name);
-  log(`registrazione salvata: ${name} — ${secs.toFixed(1)} s, ${mb(blob.size)}`);
+  // Il bitrate MEDIO effettivo, che è l'unico numero che dice se il tetto chiesto
+  // all'avvio è servito o è rimasto lì: con pannelli quasi fermi il file esce a
+  // una frazione del budget, ed è quello il comportamento giusto.
+  log(`registrazione salvata: ${name} — ${secs.toFixed(1)} s, ${mb(blob.size)}` +
+      `, ${(blob.size * 8 / secs / 1e6).toFixed(1)} Mb/s medi, ${mime}`);
 }
 
 export function exportCsv() {

@@ -10,6 +10,7 @@
 
 import { spec, pitch, T } from "../core/state.js";
 import { P, PITCH_FFT, PITCH_HOP, setupYin, yin } from "./pitch.js";
+import { micAttach, micDetach } from "./bus.js";
 import { logFail, micPermission, MIC_HINT } from "../core/diagnostics.js";
 import { resize } from "../draw/canvas.js";
 import { $, log, setLabel } from "../ui/dom.js";
@@ -69,6 +70,9 @@ export async function toggleAudio() {
     A.pTimer = setInterval(capturePitch, PITCH_HOP);
 
     A.stream.getAudioTracks()[0].addEventListener("ended", () => { if (A.on) closeAudio("sorgente chiusa"); });
+    // Il flusso lo vede anche il bus della registrazione, che è chi lo mette nel
+    // file: se una registrazione è già in corso, da qui in avanti si sente.
+    micAttach(A.stream);
     A.cols = []; A.clips = 0;
     applyFft();
     $("pSpec").hidden = $("pPitch").hidden = false;
@@ -87,6 +91,9 @@ export async function toggleAudio() {
 function releaseAudio() {
   if (A.timer) { clearInterval(A.timer); A.timer = null; }
   if (A.pTimer) { clearInterval(A.pTimer); A.pTimer = null; }
+  // Prima di fermare le tracce: la registrazione in corso torna a registrare
+  // silenzio, invece di trascinarsi dietro un nodo su una traccia morta.
+  micDetach();
   try { A.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { A.ctx?.close(); } catch {}
   A.ctx = A.stream = A.src = A.analyser = A.pAn = null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { composeLayout } from "../src/record/layout.js";
-import { emgCsv, extFor, MIME_CANDIDATES, pickMime, stampName } from "../src/record/export.js";
+import { emgCsv, extFor, MIME_CANDIDATES, stampName, supportedMimes, videoBitrate } from "../src/record/export.js";
 import { Store } from "../src/core/store.js";
 
 describe("composeLayout", () => {
@@ -58,28 +58,74 @@ describe("composeLayout", () => {
   });
 });
 
-describe("pickMime", () => {
-  it("prende il primo supportato, in ordine di preferenza", () => {
+describe("supportedMimes", () => {
+  it("torna i supportati in ordine di preferenza", () => {
     // mp4 H.264+AAC per primo: è l'unico che macOS apre da solo e l'unico che
     // dichiara la durata. WebM è il ripiego, non la scelta.
-    expect(pickMime(() => true)).toBe("video/mp4;codecs=avc1.42E01E,mp4a.40.2");
-    expect(pickMime((t) => !t.includes("mp4"))).toBe("video/webm;codecs=vp9,opus");
-    expect(pickMime((t) => t === "video/webm")).toBe("video/webm");
+    expect(supportedMimes(() => true)).toEqual(MIME_CANDIDATES);
+    expect(supportedMimes((t) => !t.includes("mp4"))[0]).toBe("video/webm;codecs=vp9,opus");
+    expect(supportedMimes((t) => t === "video/webm")).toEqual(["video/webm"]);
+  });
+
+  it("torna la LISTA e non il primo: è quella che permette di scendere di profilo", () => {
+    // `isTypeSupported` risponde sul MIME, non sull'encoder disponibile: dove
+    // H.264 è software il sì a High diventa un'eccezione al `new MediaRecorder`,
+    // e chi costruisce deve avere i candidati successivi per ripiegare.
+    expect(supportedMimes(() => true).length).toBe(MIME_CANDIDATES.length);
+  });
+
+  it("i profili H.264 scendono da High a baseline, non il contrario", () => {
+    // Il contenuto è tutto bordi netti, e baseline è l'unico dei tre senza CABAC
+    // né trasformata 8×8: prenderlo quando High è disponibile vorrebbe dire
+    // buttare nitidezza a parità di bitrate. Le prime tre lettere del profilo
+    // sono l'unica cosa che conta, il resto della stringa è livello e vincoli.
+    const profili = MIME_CANDIDATES
+      .filter((m) => m.includes("avc1."))
+      .map((m) => m.match(/avc1\.(..)/)[1].toUpperCase());
+    expect(profili).toEqual(["64", "4D", "42"]);
   });
 
   it("i codec si chiedono per nome: `video/mp4` liscio non è un candidato", () => {
     // Lasciando scegliere al browser escono H.264+Opus o VP9 dentro un mp4, che
     // sono le combinazioni che QuickTime non apre.
-    expect(pickMime((t) => t === "video/mp4")).toBe(null);
+    expect(supportedMimes((t) => t === "video/mp4")).toEqual([]);
     for (const m of MIME_CANDIDATES) expect(m).toMatch(/codecs=|^video\/webm$/);
   });
 
-  it("nessun formato supportato: null, non un MIME inventato", () => {
-    expect(pickMime(() => false)).toBe(null);
+  it("nessun formato supportato: lista vuota, non un MIME inventato", () => {
+    expect(supportedMimes(() => false)).toEqual([]);
   });
 
   it("ogni candidato è un contenitore video con estensione utile", () => {
     for (const m of MIME_CANDIDATES) expect(["webm", "mp4"]).toContain(extFor(m));
+  });
+});
+
+describe("videoBitrate", () => {
+  it("scala col numero di pixel al secondo", () => {
+    // Il doppio dei pixel chiede il doppio dei bit, nel campo dove non tocca né
+    // pavimento né tetto.
+    expect(videoBitrate(1280, 720, 30)).toBe(Math.round(1280 * 720 * 30 * 0.28));
+    expect(videoBitrate(1280, 720, 60)).toBe(2 * videoBitrate(1280, 720, 30));
+  });
+
+  it("non scende sotto il pavimento né sale sopra il tetto", () => {
+    // Sotto: a risoluzioni piccole la formula darebbe un bitrate a cui H.264 fa
+    // blocchi anche su fondo piatto. Sopra: il prodotto cresce col quadrato della
+    // finestra e oltre un certo punto non compra niente di visibile.
+    expect(videoBitrate(320, 240, 30)).toBe(4e6);
+    expect(videoBitrate(3840, 2160, 60)).toBe(32e6);
+  });
+
+  it("il bpp è un parametro, così una prova non deve cambiare la sorgente", () => {
+    // 1920×1080 e non 1280×720: a 720p il valore dimezzato cadrebbe sotto il
+    // pavimento e la prova misurerebbe il clamp invece del parametro.
+    expect(videoBitrate(1920, 1080, 30, 0.14)).toBe(
+      Math.round(videoBitrate(1920, 1080, 30, 0.28) / 2));
+  });
+
+  it("è un intero: MediaRecorder vuole un numero di bit, non una frazione", () => {
+    expect(Number.isInteger(videoBitrate(1001, 667, 30))).toBe(true);
   });
 });
 

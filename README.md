@@ -84,13 +84,31 @@ spettrogramma. È un flusso indipendente: funziona anche senza board collegata, 
 viceversa.
 
 **Registrare.** *Registra* salva un `.mp4` unico con i pannelli spuntati sotto
-⚙ (`video: sensore / pitch / spettro`) e l'audio del microfono, se è aperto. Un
-canvas fuori schermo riceve a ogni fotogramma i tre canvas impilati,
-`captureStream` lo trasforma in traccia video, e la traccia del microfono entra
-nello **stesso** `MediaStream`: la sincronia audio/video la garantisce il
-registratore, che timbra le due tracce con lo stesso orologio, e non c'è niente
-da allineare a mano. L'`offset` audio agisce sul disegno, quindi finisce dentro
-il video da sé — il file mostra esattamente quello che si vedeva a schermo.
+⚙ (`video: sensore / pitch / spettro`) e l'audio del microfono. Un canvas fuori
+schermo riceve a ogni fotogramma i tre canvas impilati, `captureStream` lo
+trasforma in traccia video, e nello **stesso** `MediaStream` entra la traccia
+audio: la sincronia audio/video la garantisce il registratore, che timbra le due
+tracce con lo stesso orologio, e non c'è niente da allineare a mano. L'`offset`
+audio agisce sul disegno, quindi finisce dentro il video da sé — il file mostra
+esattamente quello che si vedeva a schermo.
+
+**L'ordine dei due pulsanti non conta.** La traccia audio del file non è quella
+del microfono: è quella di un *bus* (`src/audio/bus.js`) che vive per tutta la
+registrazione, e a cui il microfono si aggancia quando lo apri. Serve perché un
+`MediaRecorder` fotografa le tracce all'avvio e una traccia aggiunta dopo non
+entra nel file: prendendo il microfono direttamente, *Registra* e poi *Microfono*
+dava un mp4 muto per sempre. Col bus, aprire il microfono a metà registrazione
+mette silenzio prima e audio dopo, e chiuderlo torna al silenzio invece di
+troncare la traccia.
+
+Il silenzio va **prodotto**, non sottinteso: una destinazione Web Audio senza
+niente collegato non emette campioni, e la traccia esce senza dati — l'mp4
+registrato senza mai aprire il microfono non aveva nemmeno la traccia audio, e
+quello col microfono aperto a metà aveva 2,5 s di audio su 5 di video, ribasati a
+zero, cioè sfasati. Quindi un `ConstantSourceNode` a offset 0 resta collegato per
+tutta la registrazione, e per la stessa ragione l'avvio **aspetta** che il
+contesto audio stia davvero macinando prima di far partire il registratore: sono
+le due cose che tengono l'audio allineato al video.
 
 Tre cose da sapere prima di premerlo:
 
@@ -102,8 +120,50 @@ Tre cose da sapere prima di premerlo:
   può registrare. I codec vanno chiesti **espliciti**: con `video/mp4` liscio
   Chrome sceglie da sé e nelle prove ha messo dentro ora H.264+Opus ora VP9, che
   in un mp4 sono le combinazioni che QuickTime non apre.
+- **La risoluzione del file è quella a cui l'app disegna**, cioè pixel CSS per
+  `devicePixelRatio` (limitato a 2). Su un monitor non-Retina si registra a metà
+  per lato — un quarto dei pixel — e nessun bitrate lo recupera: il log lo dice
+  all'avvio quando `dpr < 2`. Se il video esce sgranato, la prima leva è la
+  finestra più grande, non l'encoder.
 - I chunk stanno in RAM, quindi per sessioni oltre i ~10 minuti conviene
   spezzare.
+
+**Quanto bitrate, e perché il primo numero era sbagliato.** La prima stesura
+chiedeva 0.12 bit per pixel per fotogramma, ragionando sulle tracce: grafica
+vettoriale su fondo scuro, dove i bitrate da fotocamera sono soldi buttati. Il
+ragionamento vale però per due strati su tre — lo **spettrogramma è rumore a
+tutti gli effetti**, e con lui nel fotogramma l'encoder ruba bit alle linee
+sottili, che è da dove viene l'alone granuloso attorno ai tratti. Ora sono
+**0.28 bpp**, con pavimento a 4 e tetto a 32 Mb/s.
+
+È un *permesso* di spendere, non un costo: in una prova col simulatore a
+1240×380 il registratore ha chiesto 4 Mb/s e il file è uscito a **1.06**
+(`ffprobe`), perché con pannelli quasi fermi non c'era altro da codificare. Il
+conto pieno si paga quando lo spettro si muove davvero, che è quando serve —
+caso peggiore nell'ordine dei 100 MB al minuto a piena risoluzione Retina. Il
+log di salvataggio stampa il bitrate medio effettivo, così il conto si vede
+senza `ffprobe`.
+
+Il profilo H.264 chiesto è **High** (`avc1.640028`), poi Main, poi baseline.
+Baseline — che era la prima e unica scelta — è l'unico dei tre senza CABAC né
+trasformata 8×8, cioè privo di ciò che serve sui bordi netti. Misurato però a
+pari bitrate (x264 `veryfast`/`zerolatency`, che imita il vincolo realtime del
+browser, contro una sorgente lossless) il salto sulla luma è **modesto: +0.08 dB
+di PSNR**. La nitidezza la compra il bitrate, non il profilo. Dove High vince è
+la **crominanza, +1.17 dB**, ed è il difetto giusto: per il sottocampionamento
+4:2:0 una traccia colorata da un pixel su fondo scuro sbava per costruzione.
+Vale la pena chiederlo perché è gratis — il file esce anche un po' più piccolo —
+non perché risolva.
+
+I tre profili restano tutti in lista perché `isTypeSupported` risponde sul MIME
+e **non** sull'encoder che c'è davvero: dove H.264 è software (OpenH264 fa solo
+baseline) il sì diventa un'eccezione al `new MediaRecorder`, e si scende lungo la
+lista invece di rinunciare a registrare. Verificato con `ffprobe` che Chrome
+onora il profilo chiesto: nel file finisce `profile=High`, col livello
+rinegoziato secondo la risoluzione (`640028` → `640020`). Quel livello lo si sa
+solo a encoder partito — appena costruito, `rec.mimeType` rieccheggia la
+richiesta — quindi il blob prende il MIME **alla chiusura**, o dichiarerebbe
+l'intenzione invece del contenuto.
 
 **Perché mp4 e non WebM**, che pure sarebbe il formato di casa di Chrome. Due
 ragioni misurate, e nessuna delle due è la qualità:
@@ -517,15 +577,34 @@ Verificato:
   - comprimere un pannello **a registrazione avviata** non cambia la geometria
     del file e non solleva eccezioni; chiudere il **microfono** a registrazione
     avviata non ferma il video e non perde l'audio già raccolto;
-  - nessuno strato spuntato → rifiuto pulito con il motivo nel log; microfono
-    chiuso → file senza traccia audio, e il log lo dice;
+  - nessuno strato spuntato → rifiuto pulito con il motivo nel log;
+- Il **bus audio** (l'ordine dei pulsanti), sui quattro casi, sempre leggendo il
+  file con `ffprobe`/`ffmpeg` e non lo stato dell'app:
+  - *Registra* e **poi** microfono a 1,7 s: audio **5,11 s** su **5,14 s** di
+    video, e il primo suono cade a **1,714 s**, cioè dove il microfono si è
+    aperto per davvero. Prima della correzione lo stesso caso dava un mp4 **senza
+    traccia audio**;
+  - microfono e **poi** *Registra* (il caso che già funzionava): audio 4,46 s su
+    4,51 s di video, nessuna regressione;
+  - microfono **mai aperto**: traccia audio presente e piena, a **−91 dB**
+    costanti per tutti i 4,9 s — silenzio digitale, non assenza di traccia;
+  - microfono **chiuso a metà**: audio **4,97 s** su 5,01 s di video, con il
+    silenzio che riparte a **2,41 s**. Prima l'audio si fermava a 2,46 s su 5 s,
+    e veniva ribasato a zero — cioè il file usciva sfasato;
   - CSV: intestazione `t_s,valore`, una riga per campione, tempi strettamente
     crescenti; nomi `myolink-AAAAMMGG-hhmmss.ext` per entrambi i formati;
   - con il sesto pulsante nell'header, a **390×844** l'header resta **102 px** e
     i pulsanti su una riga sola come alla fase 3, e le spunte del video sono
     raggiungibili nel cassetto ⚙;
-  - **52 test unitari** verdi in tutto (17 nuovi su impaginazione del video,
-    negoziazione del formato, nomi dei file e CSV).
+  - **77 test unitari** verdi in tutto (17 su impaginazione del video,
+    negoziazione del formato, nomi dei file e CSV; 19 sul bus audio, con Web Audio
+    finto: silenzio prodotto, aggancio e sgancio del microfono, attesa dell'avvio
+    del contesto; 6 sulla qualità del video: scala e limiti del bitrate, ordine
+    dei profili H.264, e la lista dei formati che permette di ripiegare).
+- La **qualità del video**, misurata e non guardata a occhio: `ffprobe` sul file
+  registrato dall'app dice `profile=High`, `yuv420p`, durata dichiarata; SSIM e
+  PSNR contro una sorgente lossless separano il contributo del bitrate (+1.03 dB)
+  da quello del profilo (+0.08 dB di luma, +1.17 di crominanza).
 
 Sul WebM che l'app produceva prima: guardando i byte, mancavano `Duration`,
 `SeekHead` e `Cues`, e dopo un `ffmpeg -c copy` ci sono tutti e tre. È il
@@ -594,7 +673,7 @@ Non c'è `vercel.json` perché non serve nulla da configurare — e con la Root
 Directory impostata un `vercel.json` nella radice del repo verrebbe comunque
 ignorato: Vercel lo cerca dentro la root directory, cioè in `app/`.
 
-Il bundle minificato è **33 kB di JS e 5.7 kB di CSS** (13.5 + 1.9 kB gzip)
+Il bundle minificato è **35 kB di JS e 5.7 kB di CSS** (14.3 + 1.9 kB gzip)
 contro i 66 kB del file unico di prima — ed è cresciuto di 5 kB con la fase 4,
 non di più, perché registrare è quasi tutto lavoro del browser. È un
 miglioramento reale ma piccolo in assoluto: la build non è stata fatta per la

@@ -63,6 +63,23 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
 viceversa.
 
+**Se qualcosa non parte.** La prima riga del log dice quali API ci sono e in che
+stato è il permesso del microfono; quando una richiesta fallisce, sotto
+l'errore compare dove guardare. I fallimenti di `getUserMedia` e
+`requestDevice` si distinguono dal `name` della `DOMException`, non dal
+`message` — che in Chromium è spesso vuoto.
+
+Quasi sempre la causa sta fuori dall'app, ed è una di queste tre: il browser non
+ha il microfono (o il Bluetooth) fra le **autorizzazioni di sistema** — su
+Android è il caso più comune del prompt che non compare, ed è tipico di un
+browser installato da poco; il **sito** è bloccato nelle sue impostazioni;
+oppure Web Bluetooth è **disabilitato di default dal browser**, come su Brave,
+e va attivato a mano. Nessuna delle tre è aggirabile da JavaScript.
+
+Ancora su Brave: applica *farbling* antifingerprint alle API Web Audio, cioè
+perturba leggermente l'output dell'`AnalyserNode`. Visivamente irrilevante sullo
+spettrogramma, ma vale la pena saperlo prima di fidarsi di una misura fine.
+
 **I pannelli.** Ognuno ha una barra con il nome, i suoi controlli e una freccia
 che lo **comprime**; il bordo inferiore si trascina per **ridimensionarlo**. La
 larghezza no: è quella che tiene allineati gli assi dei tempi.
@@ -352,6 +369,10 @@ Verificato:
     melodia C3 G3 C4 E4 A4 C5: 414 stime su 419 sopra soglia, ~62 per nota come
     atteso, e i 10 spuri sono tutti sui gradini istantanei fra una nota e
     l'altra — un salto che la voce non fa.
+- Diagnostica dei permessi, in Chrome headless: riga d'ambiente all'avvio, un
+  messaggio con istruzione per ogni `name` mappato, degradazione pulita su un
+  `name` sconosciuto, e — col permesso a `denied` — `getUserMedia` che **non
+  viene nemmeno chiamata**, con il motivo scritto nel log.
 - Pannelli: piega, ripiega e ridimensionamento (190 → 300 px → compresso a 0)
   senza errori JS e senza toccare la larghezza, quindi gli assi restano allineati.
 
@@ -377,18 +398,35 @@ CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/
 
 ## Prossimi passi
 
-In ordine di dipendenza:
+Il piano di lavoro sta in **[docs/PIANO.md](docs/PIANO.md)**, in quattro fasi
+indipendenti e ripartibili a freddo:
 
-1. **Registrazione e riascolto** — l'audio con `MediaRecorder` (o PCM grezzo da
-   un `AudioWorklet`, che darebbe campioni esatti e permetterebbe di ricalcolare
-   lo spettrogramma offline invece di conservare le colonne); i campioni EMG sono
-   già in un array. Serve una timeline di riproduzione che piloti `tNow` invece
-   del clock, cioè un cursore scrubbabile al posto di `T.now()`.
-2. **Seriale su Android**, se servirà — via **WebUSB** (funziona su Chrome
-   Android e parla direttamente col CDC-ACM della board). Il decoder e il
-   parser sono già indipendenti dal trasporto: si aggiunge solo una
-   `connectUsb()`. Web Serial invece su Android non esiste.
-3. **Port nativo**, solo se servono iOS o installer distribuibili: Flutter con
-   `flutter_blue_plus` + `flutter_libserialport` + `usb_serial`. Protocollo e
-   logica di analisi si riusano; il grafico va riscritto con un `CustomPainter`
-   perché `fl_chart` non regge lo streaming.
+1. **Diagnostica dei permessi** — fatta, vedi sopra.
+2. **Build** — sorgenti a moduli ES e test unitari con Vite, bundle in uscita.
+   Non per velocità (66 KB in un file sono già l'ottimo), ma per i test sulle
+   parti numeriche e per poter usare dipendenze npm.
+3. **UI mobile** — stessa pagina con un breakpoint, non una versione separata.
+4. **Registrazione video + audio** — canvas di composizione e `MediaRecorder`,
+   con la sincronia A/V garantita dal recorder. Solo esportazione: niente
+   riapertura di sessione.
+
+Fuori piano per ora: timeline scrubbabile e render offline in WebCodecs;
+**seriale su Android** via WebUSB (Web Serial su Android non esiste, e il parser
+è già indipendente dal trasporto: basterebbe una `connectUsb()`); **port nativo**
+in Flutter, solo se servono iOS o installer distribuibili.
+
+## Deploy
+
+`app/index.html` è un file statico unico, senza dipendenze e senza build: va su
+qualsiasi hosting statico copiandolo. L'unico requisito è **https**, che i
+permessi di Web Serial, Web Bluetooth e microfono pretendono.
+
+Su Vercel il progetto ha **Root Directory = `app`**, così `index.html` finisce
+sulla radice del sito e il resto del repo (firmware, README) non viene
+pubblicato. Non c'è `vercel.json` perché non serve nulla da configurare — e con
+la Root Directory impostata un `vercel.json` nella radice del repo verrebbe
+comunque ignorato: Vercel lo cerca dentro la root directory, cioè in `app/`.
+
+## Licenza
+
+MIT — vedi [LICENSE](LICENSE).

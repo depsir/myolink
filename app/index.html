@@ -177,6 +177,8 @@
     Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
     <code>http://localhost</code> — non <code>file://</code>. In locale: <code>python3 -m http.server -d app 8000</code>.
     Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
+    Se qualcosa non parte, la prima riga del log dice quali API ci sono e in che stato è il permesso del
+    microfono; quando una richiesta fallisce, sotto l'errore compare dove guardare.
     <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
     un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.
     Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
@@ -488,12 +490,67 @@ function ingest(p, hostMs) {
   S.winSamples.push([hostMs, p.values.length]);
 }
 
+// ============================== diagnostica dei permessi ==============================
+
+// I fallimenti di getUserMedia() e requestDevice() arrivano come DOMException il
+// cui `message`, in Chromium, è spesso vuoto o generico: l'informazione sta in
+// `name`. Loggare solo il message rende un "non parte" da telefono indiagnosticabile.
+function errText(e) {
+  const n = e?.name || "errore";
+  return e?.message ? n + ": " + e.message : n;
+}
+
+// Da `name` a un'istruzione. Nessuno di questi casi è aggirabile da JavaScript:
+// l'unica cosa utile che l'app può fare è dire dove guardare.
+const MIC_HINT = {
+  NotAllowedError:
+    "permesso negato. Guarda in quest'ordine: 1) il browser ha il microfono fra le autorizzazioni di sistema " +
+    "(su Android: Impostazioni → App → il browser → Autorizzazioni); 2) il sito non è bloccato (lucchetto " +
+    "nella barra indirizzi → Autorizzazioni). Se il prompt non compare proprio, di solito manca il permesso " +
+    "di sistema — non quello del sito.",
+  NotFoundError: "nessun ingresso audio: il sistema non espone microfoni.",
+  NotReadableError: "microfono occupato da un'altra app, o non leggibile dal sistema.",
+  OverconstrainedError: "il dispositivo non accetta i vincoli richiesti (mono, senza filtri vocali).",
+  SecurityError: "contesto non sicuro: servono https oppure http://localhost.",
+  AbortError: "acquisizione interrotta dal sistema.",
+};
+
+const BLE_HINT = {
+  NotFoundError: "nessun device scelto: hai chiuso il selettore, oppure nessun MyoLink era in vista.",
+  SecurityError: "Web Bluetooth bloccato dal browser. Alcuni browser (Brave fra questi) lo tengono " +
+    "disabilitato di default: cercalo nelle impostazioni, dev'essere attivato a mano.",
+  NotAllowedError: "permesso negato. Su Android il browser può richiedere anche i Servizi di localizzazione " +
+    "attivi per poter scansionare, e il permesso Bluetooth fra le autorizzazioni di sistema dell'app.",
+  NetworkError: "connessione GATT fallita: il device si è allontanato, o è già connesso a qualcos'altro.",
+};
+
+const SERIAL_HINT = {
+  NotFoundError: "nessuna porta scelta: hai chiuso il selettore.",
+  NetworkError: "porta non apribile: di solito è già aperta da un altro programma — il monitor seriale " +
+    "dell'IDE Arduino è il sospetto numero uno.",
+  InvalidStateError: "porta già aperta da questa pagina.",
+  SecurityError: "contesto non sicuro: servono https oppure http://localhost.",
+};
+
+function logFail(what, e, hints) {
+  log(what + ": " + errText(e));
+  const h = hints[e?.name];
+  if (h) log("   → " + h);
+}
+
+// Non tutti i browser espongono questo nome nella Permissions API; l'assenza non
+// è un errore, è solo un'informazione che non abbiamo.
+async function micPermission() {
+  try { return (await navigator.permissions.query({ name: "microphone" })).state; }
+  catch { return null; }
+}
+
 // ============================== trasporto: seriale ==============================
 
 let serialPort = null, serialReader = null;
 
 async function connectSerial() {
-  if (!("serial" in navigator)) return log("Web Serial non disponibile. Usa Chrome/Edge su desktop, da http://localhost.");
+  if (!("serial" in navigator)) return log("Web Serial non disponibile. Serve Chrome/Edge su desktop, e un contesto sicuro: https oppure http://localhost.");
   try {
     serialPort = await navigator.serial.requestPort();
     await serialPort.open({ baudRate: 115200 });   // su USB CDC il baud è ignorato
@@ -512,7 +569,7 @@ async function connectSerial() {
       } catch (e) { if (S.running) log("errore lettura seriale: " + e.message); }
       if (S.running) stop("porta chiusa");
     })();
-  } catch (e) { log("seriale: " + e.message); }
+  } catch (e) { logFail("seriale", e, SERIAL_HINT); }
 }
 
 async function closeSerial() {
@@ -537,7 +594,10 @@ const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 let bleDevice = null, bleRx = null;
 
 async function connectBle() {
-  if (!navigator.bluetooth) return log("Web Bluetooth non disponibile. Chrome/Edge su desktop o Android, da http://localhost.");
+  if (!navigator.bluetooth) {
+    log("Web Bluetooth non disponibile. Serve Chrome/Edge su desktop o Android, e un contesto sicuro: https oppure http://localhost.");
+    return log("   → " + BLE_HINT.SecurityError);
+  }
   try {
     bleDevice = await navigator.bluetooth.requestDevice({
       filters: [{ services: [NUS] }, { namePrefix: "MyoLink" }],
@@ -555,7 +615,7 @@ async function connectBle() {
       onPacketBytes(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
     });
     await tx.startNotifications();
-  } catch (e) { log("BLE: " + e.message); }
+  } catch (e) { logFail("BLE", e, BLE_HINT); }
 }
 
 async function closeBle() {
@@ -633,6 +693,12 @@ async function toggleAudio() {
   if (!navigator.mediaDevices?.getUserMedia) {
     return log("getUserMedia non disponibile: serve https oppure http://localhost.");
   }
+  // Se il permesso è già negato il prompt non comparirà: meglio dirlo subito che
+  // far premere un pulsante che non fa niente.
+  if (await micPermission() === "denied") {
+    log("microfono: permesso negato, il browser non mostrerà nessun prompt.");
+    return log("   → " + MIC_HINT.NotAllowedError);
+  }
   try {
     // I filtri pensati per le chiamate vocali sono l'opposto di ciò che serve
     // qui: la soppressione del rumore buca lo spettro, il guadagno automatico
@@ -675,7 +741,7 @@ async function toggleAudio() {
     // può fallire a metà (permesso negato, nessun ingresso): quello che è stato
     // aperto va richiuso comunque
     releaseAudio();
-    log("audio: " + e.message);
+    logFail("microfono", e, MIC_HINT);
   }
 }
 
@@ -1559,6 +1625,19 @@ $("btnAuto").onclick = () => {
 resize();
 requestAnimationFrame(draw);
 log('pronto — "Simulatore" per provare senza hardware');
+
+// Un report di "non parte" parte già con i fatti: quali API ci sono e in che
+// stato. Costa una riga di log e fa risparmiare un giro di domande.
+(async () => {
+  const yn = (b) => (b ? "sì" : "no");
+  log(
+    "ambiente: contesto sicuro " + yn(window.isSecureContext) +
+    " · Web Serial " + yn("serial" in navigator) +
+    " · Web Bluetooth " + yn(!!navigator.bluetooth) +
+    " · getUserMedia " + yn(!!navigator.mediaDevices?.getUserMedia) +
+    " · permesso microfono: " + ((await micPermission()) || "sconosciuto")
+  );
+})();
 </script>
 </body>
 </html>

@@ -1,0 +1,19 @@
+{
+  "name": "myolink",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ricevitore web per MyoLink: grafico live, pitch e spettrogramma sullo stesso asse dei tempi.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}

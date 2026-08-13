@@ -13,7 +13,12 @@ funziona da solo.
 ```
 firmware/myoware/myoware.ino   sketch unico: seriale + BLE, sceglie da solo (vedi sotto)
 firmware/myoware/myolink.h     campionamento + formato pacchetto
-app/index.html                 ricevitore web: grafico live, pitch, spettrogramma, statistiche del link
+app/                           ricevitore web (Vite): grafico live, pitch, spettrogramma, statistiche
+app/src/core/                  protocollo, clock, store, ingestione — senza DOM, quindi testabili
+app/src/audio/                 acquisizione microfono e YIN
+app/src/draw/                  i tre canvas, che condividono l'asse dei tempi
+app/test/                      test unitari (vitest)
+docs/PIANO.md                  piano di lavoro in quattro fasi
 ```
 
 ## Avvio rapido
@@ -41,13 +46,27 @@ col simulatore.
 **App.** Pronta all'uso su <https://myolink.vercel.app>, in Chrome o Edge:
 *Collega seriale* (desktop) oppure *Collega BLE* (desktop e Android).
 
-Per modificarla serve un server locale, perché Web Serial, Web Bluetooth e il
-microfono richiedono un contesto sicuro — `https` oppure `localhost`, e **non
-`file://`**:
+Per modificarla:
 
 ```sh
-python3 -m http.server -d app 8000    # poi apri http://localhost:8000
+cd app
+npm install
+npm run dev      # http://localhost:5173, con ricarica a caldo
+npm test         # protocollo, COBS, clock, store, YIN
+npm run build    # bundle in app/dist
 ```
+
+Il server di sviluppo serve su `localhost`, che è quello che serve: Web Serial,
+Web Bluetooth e il microfono pretendono un contesto sicuro — `https` oppure
+`localhost`, e **non `file://`**.
+
+Il taglio in moduli segue una regola sola: **`core/` e `audio/pitch.js` non
+toccano il DOM**, e sono infatti i moduli coperti dai test — CRC, COBS,
+srotolamento del timestamp, regressione del clock, ring buffer, YIN. Il resto
+(disegno, pannelli, statistiche) è UI e si verifica in browser. Per quella parte
+c'è `window.MyoLink`, che espone gli oggetti di stato: con i moduli ES le
+variabili di primo livello non sono più globali, e il banco di prova in Chrome
+headless via CDP legge lo stato da lì.
 
 Il campo **Y** va messo `0`–`1000` col simulatore del firmware e `0`–`4095` col
 sensore reale (ADC a 12 bit); il pulsante *Auto Y* lo calcola sui dati visibili.
@@ -244,6 +263,15 @@ L'obiettivo è non accumulare errore. Tre scelte:
    ring buffer, `loop()` lo svuota. Se lo stack BLE blocca per 30 ms, i
    timestamp restano corretti.
 
+**Limite noto**, emerso scrivendo i test: lo srotolamento non può distinguere
+"il device è ripartito da zero" da "sono passati ~71.6 minuti", quindi un reset
+del device **senza** riconnessione viene letto come un salto in avanti di ~4294
+secondi invece che come un ritorno indietro, e il controllo di monotonia non
+scatta. Succede solo sulla seriale, dove la porta resta aperta attraverso il
+reset della board; su BLE il link cade e `startSession` azzera lo srotolamento.
+Il caso è fissato in un test, che documenta il comportamento attuale invece di
+pretendere quello desiderato.
+
 Resta solo la deriva del cristallo, ~40 ppm = 144 ms/ora: irrilevante per il
 grafico. Per allineare all'audio, l'app stima `host = a·device + b` con una
 regressione a dimenticanza esponenziale — `a` dà lo skew in ppm, `b` l'offset.
@@ -373,6 +401,12 @@ Verificato:
   messaggio con istruzione per ogni `name` mappato, degradazione pulita su un
   `name` sconosciuto, e — col permesso a `denied` — `getUserMedia` che **non
   viene nemmeno chiamata**, con il motivo scritto nel log.
+- Il taglio in moduli non ha cambiato comportamento: **35 test unitari** verdi
+  (i vettori di CRC e COBS di cui sopra ora sono automatici) e, sulla app
+  buildata in Chrome headless, parità su tutto quello che si può osservare —
+  simulatore, timestamp monotoni, colonne di spettro, un tono a 440 Hz
+  riconosciuto come A4 a +1 cent, piega dei pannelli senza toccare la
+  larghezza, stop pulito, zero eccezioni JS.
 - Pannelli: piega, ripiega e ridimensionamento (190 → 300 px → compresso a 0)
   senza errori JS e senza toccare la larghezza, quindi gli assi restano allineati.
 
@@ -402,8 +436,8 @@ Il piano di lavoro sta in **[docs/PIANO.md](docs/PIANO.md)**, in quattro fasi
 indipendenti e ripartibili a freddo:
 
 1. **Diagnostica dei permessi** — fatta, vedi sopra.
-2. **Build** — sorgenti a moduli ES e test unitari con Vite, bundle in uscita.
-   Non per velocità (66 KB in un file sono già l'ottimo), ma per i test sulle
+2. **Build** — fatta: sorgenti a moduli ES e 35 test unitari, bundle con Vite.
+   Non per velocità (66 KB in un file erano già l'ottimo), ma per i test sulle
    parti numeriche e per poter usare dipendenze npm.
 3. **UI mobile** — stessa pagina con un breakpoint, non una versione separata.
 4. **Registrazione video + audio** — canvas di composizione e `MediaRecorder`,
@@ -417,15 +451,21 @@ in Flutter, solo se servono iOS o installer distribuibili.
 
 ## Deploy
 
-`app/index.html` è un file statico unico, senza dipendenze e senza build: va su
-qualsiasi hosting statico copiandolo. L'unico requisito è **https**, che i
-permessi di Web Serial, Web Bluetooth e microfono pretendono.
+`npm run build` produce in `app/dist` dei file statici — un `index.html`, un JS e
+un CSS, senza dipendenze a runtime — che vanno su qualsiasi hosting statico
+copiandoli. L'unico requisito è **https**, che i permessi di Web Serial, Web
+Bluetooth e microfono pretendono.
 
-Su Vercel il progetto ha **Root Directory = `app`**, così `index.html` finisce
-sulla radice del sito e il resto del repo (firmware, README) non viene
-pubblicato. Non c'è `vercel.json` perché non serve nulla da configurare — e con
-la Root Directory impostata un `vercel.json` nella radice del repo verrebbe
-comunque ignorato: Vercel lo cerca dentro la root directory, cioè in `app/`.
+Su Vercel il progetto ha **Root Directory = `app`**, così il resto del repo
+(firmware, README) non viene pubblicato. Da lì il framework Vite viene
+riconosciuto da solo: build command `npm run build`, output directory `dist`.
+Non c'è `vercel.json` perché non serve nulla da configurare — e con la Root
+Directory impostata un `vercel.json` nella radice del repo verrebbe comunque
+ignorato: Vercel lo cerca dentro la root directory, cioè in `app/`.
+
+Il bundle minificato è **28 kB di JS e 3.4 kB di CSS** (11.5 + 1.3 kB gzip)
+contro i 66 kB del file unico di prima. È un miglioramento reale ma piccolo in
+assoluto: la build non è stata fatta per la velocità della pagina.
 
 ## Licenza
 

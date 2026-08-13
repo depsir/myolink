@@ -6,7 +6,7 @@ freddo: qui c'è il perché, cosa si tocca e quando è finita.
 | # | fase | stato |
 |---|------|-------|
 | 1 | Diagnostica dei permessi (bug Brave mobile) | **fatta** |
-| 2 | Build: sorgenti a moduli, bundle in uscita | da fare |
+| 2 | Build: sorgenti a moduli, bundle in uscita | **fatta** |
 | 3 | UI mobile | da fare |
 | 4 | Registrazione video + audio | da fare |
 
@@ -105,19 +105,36 @@ app/
 build command `npm run build`, output directory `dist`. Il README va corretto:
 oggi dice "file statico unico, senza build".
 
-**Fatto quando.**
-- `npm run dev` serve l'app in locale con hot reload su https/localhost;
-- `npm run build` produce un `dist/` deployabile, e l'app buildata si comporta
-  come oggi (grafico, pitch, spettrogramma, entrambi i trasporti, simulatore);
-- `npm test` verde su CRC, COBS, packet, wrap del timestamp, YIN, store;
-- il deploy Vercel funziona dal build.
+**Fatto quando.** ✅
+- `npm run dev` serve l'app con ricarica a caldo su localhost;
+- `npm run build` produce `dist/` (28 kB JS + 3.4 kB CSS, contro 66 kB di prima)
+  e l'app buildata si comporta come quella di prima;
+- `npm test` verde: **35 test** su CRC, COBS, parsing, srotolamento del
+  timestamp, contabilità delle perdite, clock, ring buffer e YIN;
+- parità verificata in Chrome headless sulla build: simulatore, timestamp
+  monotoni, colonne di spettro, 440 Hz → A4 a +1 cent, pannelli, stop, zero
+  eccezioni.
 
-**Trappole.**
-- I test del DSP non hanno bisogno del DOM: tenere `dsp/` e `proto/` puri, senza
-  toccare `document` — è la ragione principale per cui lo split conviene.
-- L'ordine di inizializzazione: oggi il codice si affida al fatto che tutto sta
-  in un unico scope. I moduli lo rendono esplicito, e qualche `const` di livello
-  superiore va spostata in `state.js` per non creare cicli di import.
+**Com'è venuto.** La struttura è quella prevista, con quattro scelte che vale la
+pena ricordare:
+
+- **La regola del taglio**: `core/` e `audio/pitch.js` non toccano il DOM, ed è
+  esattamente l'insieme coperto dai test. Tre piccoli disaccoppiamenti sono
+  serviti per arrivarci: `log()` cerca il suo elemento alla prima chiamata (non
+  al caricamento), `SpecStore.spanS` riceve l'hop come parametro invece di
+  leggerlo dall'audio, e `setupYin` restituisce la riga di info invece di
+  scriverla nel DOM.
+- **Niente cicli di import**: il ciclo naturale sessione ↔ trasporti è rotto da
+  un registro (`onStop` / `onSend`), e il ciclo canvas ↔ disegnatori spostando
+  il ciclo di `requestAnimationFrame` in `main.js`.
+- **`window.MyoLink`**: con i moduli ES le variabili di primo livello non sono
+  più globali, e il banco di prova via CDP le leggeva. È l'unico punto
+  d'accesso, dichiarato apposta.
+- **Un limite trovato dai test**, non introdotto: lo srotolamento del timestamp
+  non distingue un reset del device da un wrap dei 32 bit, quindi un reset della
+  board *sulla seriale* (dove la porta resta aperta) viene letto come un salto
+  in avanti di ~4294 s. Il test lo fissa come comportamento attuale e il README
+  lo documenta; sistemarlo è una decisione a parte, non un pezzo di refactor.
 
 ---
 
@@ -135,7 +152,7 @@ una versione mobile separata.
 - Altezze fisse 380 + 190 + 320 px: in portrait si vede un pannello e mezzo.
 - Il grip è alto **7px** e non ha `touch-action: none`: col dito è quasi
   impossibile da prendere, e mentre trascini la pagina scrolla sotto. Le pointer
-  events ci sono già (`index.html:944`), quindi è area di tocco + una riga CSS.
+  events ci sono già (`src/ui/panels.js`), quindi è area di tocco + una riga CSS.
 - Gli input numerici sono 60-72px con 4px di padding: sotto la soglia dei 44px
   di target tattile.
 

@@ -13,6 +13,10 @@
 # Claude Code — impostazioni locali
 .claude/settings.local.json
 
+# Web app
+node_modules/
+app/dist/
+
 # Arduino / build
 build/
 *.bin

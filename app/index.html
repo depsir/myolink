@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MyoLink — ricevitore live</title>
+<meta name="description" content="MyoWare su Arduino Nano ESP32 via seriale o BLE: grafico live con timestamp esatti, pitch e spettrogramma del microfono sullo stesso asse dei tempi.">
+<meta property="og:title" content="MyoLink — ricevitore live">
+<meta property="og:description" content="MyoWare su Arduino Nano ESP32 via seriale o BLE: grafico live con timestamp esatti, pitch e spettrogramma del microfono sullo stesso asse dei tempi.">
+<meta property="og:type" content="website">
+<!-- Favicon inline: nessuna richiesta di rete, quindi niente 404 in console. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1116'/%3E%3Cpath d='M3 16h5l2-7 3 14 3-11 2 6 2-3h7' fill='none' stroke='%234ea1ff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --line: #262c36;
@@ -168,8 +174,8 @@
   <div id="stats"></div>
   <div id="log"></div>
   <p class="hint">
-    Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: apri questa pagina da
-    <code>http://localhost</code>, non da <code>file://</code>. Es. <code>python3 -m http.server -d app 8000</code>.
+    Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
+    <code>http://localhost</code> — non <code>file://</code>. In locale: <code>python3 -m http.server -d app 8000</code>.
     Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
     <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
     un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.

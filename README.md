@@ -5,6 +5,11 @@ timestamp a cadenza esatta per poter ricostruire il segnale anche in presenza
 di ritardi o pacchetti perduti. Sotto al grafico, la **nota cantata** e lo
 **spettrogramma del microfono**, sullo stesso asse dei tempi.
 
+**App online: <https://myolink.vercel.app>** — Chrome o Edge. Senza hardware si
+vede comunque tutto: il pulsante *Simulatore* genera i pacchetti dentro il
+browser, e il *Microfono* con pitch e spettrogramma è un flusso indipendente che
+funziona da solo.
+
 ```
 firmware/myoware/myoware.ino   sketch unico: seriale + BLE, sceglie da solo (vedi sotto)
 firmware/myoware/myolink.h     campionamento + formato pacchetto
@@ -33,15 +38,16 @@ la catena senza sensore attaccato** — genera un random walk con inerzia in
 che rimbalza sui bordi invece di saturare, così un clipping vero non si confonde
 col simulatore.
 
-**App.** Web Serial e Web Bluetooth richiedono un contesto sicuro: **non
-funzionano da `file://`**.
+**App.** Pronta all'uso su <https://myolink.vercel.app>, in Chrome o Edge:
+*Collega seriale* (desktop) oppure *Collega BLE* (desktop e Android).
+
+Per modificarla serve un server locale, perché Web Serial, Web Bluetooth e il
+microfono richiedono un contesto sicuro — `https` oppure `localhost`, e **non
+`file://`**:
 
 ```sh
 python3 -m http.server -d app 8000    # poi apri http://localhost:8000
 ```
-
-Chrome o Edge. *Collega seriale* (desktop) oppure *Collega BLE* (desktop e
-Android).
 
 Il campo **Y** va messo `0`–`1000` col simulatore del firmware e `0`–`4095` col
 sensore reale (ADC a 12 bit); il pulsante *Auto Y* lo calcola sui dati visibili.

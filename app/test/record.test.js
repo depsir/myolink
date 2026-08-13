@@ -60,9 +60,18 @@ describe("composeLayout", () => {
 
 describe("pickMime", () => {
   it("prende il primo supportato, in ordine di preferenza", () => {
-    expect(pickMime((t) => true)).toBe("video/webm;codecs=vp9,opus");
-    expect(pickMime((t) => !t.includes("vp9"))).toBe("video/webm;codecs=vp8,opus");
-    expect(pickMime((t) => t === "video/mp4")).toBe("video/mp4");
+    // mp4 H.264+AAC per primo: è l'unico che macOS apre da solo e l'unico che
+    // dichiara la durata. WebM è il ripiego, non la scelta.
+    expect(pickMime(() => true)).toBe("video/mp4;codecs=avc1.42E01E,mp4a.40.2");
+    expect(pickMime((t) => !t.includes("mp4"))).toBe("video/webm;codecs=vp9,opus");
+    expect(pickMime((t) => t === "video/webm")).toBe("video/webm");
+  });
+
+  it("i codec si chiedono per nome: `video/mp4` liscio non è un candidato", () => {
+    // Lasciando scegliere al browser escono H.264+Opus o VP9 dentro un mp4, che
+    // sono le combinazioni che QuickTime non apre.
+    expect(pickMime((t) => t === "video/mp4")).toBe(null);
+    for (const m of MIME_CANDIDATES) expect(m).toMatch(/codecs=|^video\/webm$/);
   });
 
   it("nessun formato supportato: null, non un MIME inventato", () => {

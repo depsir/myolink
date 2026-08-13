@@ -262,10 +262,11 @@ sessione rianalizzabile, cosa che un video non è.
 **Fatto quando.** ✅ Si preme *Registra*, si sceglie cosa includere, si ferma, e
 si scarica un `.webm` in cui i grafici scorrono e l'audio è allineato a quello
 che mostravano. Verificato in Chrome headless con ffprobe sul file prodotto:
-1240×906 VP9 + Opus, **173 fotogrammi in 5.745 s (30.1 fps)** contro i 30
-chiesti, le due tracce che partono entro **39 ms** e finiscono entro **6 ms**
+`.mp4` 1240×906 H.264 + AAC, **171 fotogrammi in 5.71 s (29.9 fps)** contro i 30
+chiesti, le due tracce che partono entro **0 ms** e finiscono entro **2 ms**
 l'una dall'altra, un fotogramma estratto a metà che contiene davvero i tre
-pannelli. Il CSV è arrivato con 192 righe e tempi strettamente crescenti.
+pannelli, e la miniatura QuickLook che macOS genera da solo. Il CSV è arrivato
+con 196 righe e tempi strettamente crescenti.
 
 **Com'è venuto.** L'impianto è quello previsto — un canvas di composizione, un
 solo recorder, niente sincronizzazione a mano — con cinque cose da ricordare:
@@ -287,12 +288,16 @@ solo recorder, niente sincronizzazione a mano — con cinque cose da ricordare:
   dice il log. Il caso opposto — chiudere il microfono *mentre* si registra, che
   ferma la traccia che il recorder ha in mano — non rompe niente: il video
   continua e l'audio raccolto fino a lì resta nel file.
-- **Il file non ha la durata nell'header, ed è normale.** MediaRecorder scrive un
-  WebM "live": a inizio file la durata non è nota e il campo `Duration` resta
-  vuoto. Si riproduce, ma qualche player non mostra la barra e non fa seek.
-  Rimetterla a posto sarebbe riscrivere l'EBML a fine registrazione (una
-  dipendenza), oppure una riga fuori dall'app: `ffmpeg -i x.webm -c copy y.webm`.
-  Sta nel README, non nel codice.
+- **Il formato è mp4, e la scelta è arrivata dopo.** Si partiva da WebM VP9 —
+  formato di casa di Chrome — ed è durato fino alla prima prova su un Mac vero.
+  Due cose, misurate: macOS il WebM non lo legge affatto (nessuna anteprima,
+  nessuna miniatura, `qlmanage` che si pianta invece di fallire), e il WebM di
+  `MediaRecorder` non dichiara la durata perché è un muxer *live* — guardando i
+  byte mancano `Duration`, `SeekHead` e `Cues`. L'mp4 dello stesso registratore
+  risolve entrambe senza una riga di post-processing. I codec però vanno chiesti
+  **per nome**: con `video/mp4` liscio Chrome ha messo dentro ora H.264+Opus ora
+  VP9, cioè proprio le combinazioni che QuickTime non apre. WebM resta come
+  ripiego dove l'mp4 non si registra.
 - **Il CSV era davvero quasi gratis** e vale più di quanto costa: esporta la
   finestra viva del ring buffer con i tempi a microsecondi, che è la risoluzione
   a cui timbra il firmware — scriverne meno butterebbe via l'informazione per cui

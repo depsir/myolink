@@ -83,7 +83,7 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
 viceversa.
 
-**Registrare.** *Registra* salva un `.webm` unico con i pannelli spuntati sotto
+**Registrare.** *Registra* salva un `.mp4` unico con i pannelli spuntati sotto
 ⚙ (`video: sensore / pitch / spettro`) e l'audio del microfono, se è aperto. Un
 canvas fuori schermo riceve a ogni fotogramma i tre canvas impilati,
 `captureStream` lo trasforma in traccia video, e la traccia del microfono entra
@@ -97,12 +97,35 @@ Tre cose da sapere prima di premerlo:
 - **Non cambiare scheda mentre registri.** In background `requestAnimationFrame`
   si ferma, il canvas non cambia più e il video prende un fotogramma lunghissimo.
   Il log lo dice quando succede, ma il file è già rovinato.
-- Il file **non ha la durata nell'header**: `MediaRecorder` scrive un WebM
-  *live*, dove a inizio file la durata non è nota. Si riproduce, ma qualche
-  player non mostra la barra e non fa seek. Si rimette a posto fuori dall'app con
-  `ffmpeg -i registrazione.webm -c copy sistemato.webm`.
-- Formato VP9 + Opus, negoziato con `MediaRecorder.isTypeSupported`; i chunk
-  stanno in RAM, quindi per sessioni oltre i ~10 minuti conviene spezzare.
+- **H.264 + AAC in mp4**, chiesti per nome e negoziati con
+  `MediaRecorder.isTypeSupported`; WebM VP9 resta come ripiego dove l'mp4 non si
+  può registrare. I codec vanno chiesti **espliciti**: con `video/mp4` liscio
+  Chrome sceglie da sé e nelle prove ha messo dentro ora H.264+Opus ora VP9, che
+  in un mp4 sono le combinazioni che QuickTime non apre.
+- I chunk stanno in RAM, quindi per sessioni oltre i ~10 minuti conviene
+  spezzare.
+
+**Perché mp4 e non WebM**, che pure sarebbe il formato di casa di Chrome. Due
+ragioni misurate, e nessuna delle due è la qualità:
+
+1. **macOS non legge il WebM.** Niente anteprima nel Finder, niente miniatura,
+   niente QuickTime: serve per forza Chrome o VLC. Con l'mp4 QuickLook genera la
+   miniatura e il doppio clic funziona — è la differenza fra un file che si
+   condivide e uno che si spiega.
+2. **Il WebM di `MediaRecorder` non dichiara la durata.** È un flusso *live*:
+   `Duration`, `SeekHead` e `Cues` (l'indice dei cluster) non ci sono, perché a
+   inizio file non si sa ancora dove finiranno. Qualche player non mostra la
+   barra e non fa seek. L'mp4 dello stesso registratore la durata ce l'ha.
+
+Se ti capita fra le mani un `.webm` di una versione precedente, `ffmpeg -i
+vecchio.webm -c copy sistemato.webm` gli ricostruisce durata e indice.
+
+**Il messaggio di macOS «Apple could not verify…»** quando apri il file scaricato
+**non c'entra col formato**: è la quarantena (`com.apple.quarantine`) che il
+browser mette su *qualsiasi* download. Verificato che il verdetto di Gatekeeper è
+identico su mp4 e su webm con la stessa quarantena. Si toglie con
+`xattr -d com.apple.quarantine file`, oppure una volta sola da Impostazioni →
+Privacy e sicurezza → *Apri comunque*.
 
 Quello che si vede a schermo si registra com'è: geometria e strati si fissano
 alla partenza, perché un `MediaRecorder` non cambia risoluzione a metà stream.
@@ -481,11 +504,14 @@ Verificato:
     il desktop non si è accorto di niente.
 - Registrazione, in Chrome headless con `ffprobe` e `ffmpeg` sul file davvero
   scaricato — non sullo stato interno dell'app:
-  - `.webm` **1240×906 VP9 + Opus**, una traccia video e una audio nello stesso
-    file, **173 fotogrammi in 5.745 s = 30.1 fps** contro i 30 chiesti a
-    `captureStream`;
-  - le due tracce partono entro **39 ms** e finiscono entro **6 ms** l'una
+  - `.mp4` **1240×906 H.264 + AAC**, una traccia video e una audio nello stesso
+    file, **171 fotogrammi in 5.71 s = 29.9 fps** contro i 30 chiesti a
+    `captureStream`, e durata **dichiarata nel contenitore** (5.74 s);
+  - le due tracce partono entro **0 ms** e finiscono entro **2 ms** l'una
     dall'altra: è la sincronia che dà il recorder, senza allineare niente;
+  - **QuickLook di macOS genera la miniatura** del file mp4; sullo stesso
+    contenuto in WebM non la genera — `qlmanage` si pianta finché non lo si
+    ammazza. È la ragione per cui il formato di uscita è mp4;
   - un fotogramma estratto a metà contiene davvero i tre pannelli impilati, con
     la tastiera del pitch, la targhetta della nota e le colonne di spettro;
   - comprimere un pannello **a registrazione avviata** non cambia la geometria
@@ -498,13 +524,14 @@ Verificato:
   - con il sesto pulsante nell'header, a **390×844** l'header resta **102 px** e
     i pulsanti su una riga sola come alla fase 3, e le spunte del video sono
     raggiungibili nel cassetto ⚙;
-  - **51 test unitari** verdi in tutto (16 nuovi su impaginazione del video,
+  - **52 test unitari** verdi in tutto (17 nuovi su impaginazione del video,
     negoziazione del formato, nomi dei file e CSV).
 
-Il `.webm` di `MediaRecorder` non ha la durata nell'header — è un WebM *live*,
-dove a inizio file la durata non è nota. Verificato che è così anche qui, ed è il
-comportamento del browser, non un difetto dell'app: `ffmpeg -c copy` la
-ricostruisce.
+Sul WebM che l'app produceva prima: guardando i byte, mancavano `Duration`,
+`SeekHead` e `Cues`, e dopo un `ffmpeg -c copy` ci sono tutti e tre. È il
+comportamento del muxer *live* del browser, non un difetto dell'app — ma è anche
+il motivo per cui il formato di uscita ora è mp4, dove lo stesso registratore la
+durata la scrive.
 
 Nota sul banco di prova: il dispositivo audio finto di Chrome emette silenzio più
 **click a fondo scala**, che sono impulsi a banda larga e da soli fanno sbagliare

@@ -4,16 +4,28 @@
 // che si vedono solo *fuori* dall'app — quando il file è già sul disco — e
 // nessuna delle tre tocca il DOM: stanno qui insieme perché siano testabili.
 
-// In ordine di preferenza. VP9 comprime meglio a parità di bitrate su contenuto
-// grafico (linee nette su fondo scuro, che è tutto quello che registriamo);
-// Opus è l'unico codec audio che WebM ammette. `video/webm` senza codecs lascia
-// scegliere al browser, e `video/mp4` è l'unica strada su Safari — dove non
-// c'è né Web Serial né Web Bluetooth, ma il microfono da solo funziona.
+// In ordine di preferenza, e la prima scelta è **H.264 + AAC in mp4** per due
+// motivi misurati, non per gusto:
+//
+// 1. macOS non sa leggere il WebM: niente anteprima nel Finder, niente
+//    miniatura, niente QuickTime — serve per forza Chrome o VLC. Un mp4 lo apre
+//    tutto, ed è la differenza fra un file che si condivide e uno che si spiega.
+// 2. Il WebM di MediaRecorder è un flusso *live* e non dichiara la durata; il
+//    suo mp4 sì. Cioè la barra di scorrimento funziona senza rimuxare niente.
+//
+// I codec vanno chiesti per NOME: con `video/mp4` liscio Chrome sceglie da sé, e
+// nelle prove ha messo dentro ora H.264+Opus ora VP9 — che in un mp4 sono
+// esattamente le combinazioni che QuickTime non apre. Il livello del profilo
+// (`42E01E` = baseline 3.0) lo rinegozia il browser secondo la risoluzione.
+//
+// WebM resta come ripiego dove registrare in mp4 non si può (Firefox, Chrome
+// vecchi): meglio un file che si guarda con qualche attrezzo in più che nessun
+// file. `video/mp4` liscio invece NON è nella lista, proprio perché imprevedibile.
 export const MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
   "video/webm;codecs=vp9,opus",
   "video/webm;codecs=vp8,opus",
   "video/webm",
-  "video/mp4",
 ];
 
 // Il predicato è iniettabile perché MediaRecorder non esiste in node.

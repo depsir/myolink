@@ -468,7 +468,10 @@ lo store invece della registrazione). A quelle la fase 6 ne aggiunge tre sue:
 
 ## Da dove ripartire a freddo
 
-1. `git status` — c'è un mese di lavoro non committato. Committare prima di tutto.
+1. Il lavoro delle fasi 5 e 6 è committato (`c47fcf7`). Quello che **non** c'è in
+   git sono le registrazioni: `docs/samples/` è ignorato apposta (90 MB, di cui 89
+   di mp4), quindi da un clone i punti 3, 4 e 5 non girano — servono quei file sul
+   disco, e sono l'unica cosa di questo piano che non si può ricostruire.
 2. `cd app && npm test` (190 attesi) e `node app/tools/bench-momenti.mjs` (41 controlli verdi).
 3. `node app/tools/analisi-samples.mjs` — tutti i numeri di questo piano, rifatti.
 4. `node app/tools/marks-csv.mjs docs/samples/myolink-20260904-162656.csv --pitch

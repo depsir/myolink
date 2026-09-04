@@ -56,6 +56,13 @@ const chrome = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chro
   "--headless=new", `--remote-debugging-port=${CDP}`, `--user-data-dir=${OUT}/chrome`,
   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
   "--autoplay-policy=no-user-gesture-required", "--window-size=1280,1100",
+  // `--headless=new` nasconde la finestra, non l'audio: il test del riascolto
+  // manda in riproduzione quello che ha appena registrato, e quello che ha
+  // registrato sono i click a fondo scala del microfono finto di Chrome. Senza
+  // questo flag il banco fa quattro beep dalle casse a ogni giro. Muta l'USCITA,
+  // non la cattura: la riproduzione parte lo stesso e il cursore la segue, che è
+  // quello che il test controlla.
+  "--mute-audio",
   `http://localhost:${PORT}/`,
 ], { stdio: "ignore" });
 kids.push(chrome);

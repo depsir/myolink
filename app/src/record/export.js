@@ -101,24 +101,140 @@ export function extFor(mime) {
 // nella cartella dei download, e i due punti dell'ISO su Windows non sono
 // nemmeno un nome di file valido.
 const p2 = (n) => String(n).padStart(2, "0");
+export function stamp(d = new Date()) {
+  return [d.getFullYear(), p2(d.getMonth() + 1), p2(d.getDate())].join("") +
+         "-" + [d.getHours(), d.getMinutes(), d.getSeconds()].map(p2).join("");
+}
+
+// Il timbro è esportato a parte perché i file di UNA registrazione devono
+// condividerlo: video e CSV con due timbri diversi (anche solo un secondo) non
+// si riconoscono più come lo stesso pezzo di prova, che è tutto il punto.
 export function stampName(base, ext, d = new Date()) {
-  const s = [d.getFullYear(), p2(d.getMonth() + 1), p2(d.getDate())].join("") +
-            "-" + [d.getHours(), d.getMinutes(), d.getSeconds()].map(p2).join("");
-  return `${base}-${s}.${ext}`;
+  return `${base}-${stamp(d)}.${ext}`;
+}
+
+// ---- la fetta di un anello dentro un intervallo di tempo ----
+//
+// Indici logici [from, to) degli elementi con t dentro [t0, t1], estremi
+// compresi. Senza intervallo: tutto quello che c'è, che è il caso dell'export
+// "tutta la memoria".
+//
+// Serve perché i CSV di una registrazione non sono i CSV della sessione: la
+// domanda "questi dati sono quelli del video?" ha una risposta sola, e passa da
+// qui. La ricerca è binaria come quella dell'anello — un CSV si esporta anche a
+// mezzo milione di campioni, e uno scorrimento lineare per trovare l'inizio si
+// pagherebbe due volte (una per file).
+export function inRange(ring, range) {
+  if (!range) return { from: 0, to: ring.n };
+  const from = ring.firstAtOrAfter(range.t0);
+  // `firstAtOrAfter(t1)` è il primo >= t1: gli elementi timbrati ESATTAMENTE a
+  // t1 sono dentro l'intervallo, quindi il ciclo li supera. Sono pochi per
+  // costruzione (i tempi crescono), non è una scansione.
+  let to = Math.max(from, ring.firstAtOrAfter(range.t1));
+  while (to < ring.n && ring.t[ring.idx(to)] <= range.t1) to++;
+  return { from, to };
+}
+
+// Quanti elementi cadono nell'intervallo. Chi salva lo chiede PRIMA di costruire
+// il file: un CSV di sola intestazione è un file che non dice niente e sembra un
+// dato perso, quindi in quel caso non lo si scrive affatto e lo si scrive nel log.
+export function countInRange(ring, range) {
+  const { from, to } = inRange(ring, range);
+  return to - from;
 }
 
 // I campioni EMG così come sono nello store: tempo del grafico in secondi (la
-// base del device quando c'è un link, vedi T) e valore ADC grezzo. È l'unico
-// output che rende una sessione RIANALIZZABILE — un video non lo è — e costa
-// una funzione, perché i dati sono già timbrati e in ordine.
+// base del device quando c'è un link, vedi T) e valore ADC grezzo. Con `range`
+// esce la sola fetta registrata — è quello che rende il CSV *della prova* invece
+// che *della sessione*. È l'unico output che rende una prova RIANALIZZABILE — un
+// video non lo è — e costa una funzione, perché i dati sono già timbrati e in
+// ordine.
 //
 // Microsecondi di risoluzione sul tempo: il device timbra in µs, scriverne meno
 // butterebbe via l'informazione per cui esiste il protocollo.
-export function emgCsv(store) {
+export function emgCsv(store, range = null) {
   const rows = ["t_s,valore"];
-  for (let k = 0; k < store.n; k++) {
+  const { from, to } = inRange(store, range);
+  for (let k = from; k < to; k++) {
     const i = store.idx(k), v = store.v[i];
     rows.push(store.t[i].toFixed(6) + "," + (Number.isInteger(v) ? v : v.toFixed(3)));
   }
   return rows.join("\n") + "\n";
+}
+
+// I campioni del pitch, con la clarity accanto. Due file e non uno perché sono
+// due basi dei tempi diverse — l'EMG è timbrato dal firmware, il pitch dall'hop
+// dell'audio — e fonderli vorrebbe dire interpolarne uno dei due, cioè inventare.
+//
+// Serve a una cosa precisa: senza il pitch, un CSV rianalizzato a freddo non può
+// far girare "sostegno che manca", che ha bisogno di sapere quando c'era voce.
+// Con questo file, una sessione registrata è rianalizzabile per intero fuori
+// dall'app — che è il modo in cui le costanti della fase 5 sono state tarate
+// finora, e l'unico che non richieda di rimettere il sensore addosso a qualcuno.
+export function pitchCsv(pitch, range = null) {
+  const rows = ["t_s,midi,clarity"];
+  const { from, to } = inRange(pitch, range);
+  for (let k = from; k < to; k++) {
+    const i = pitch.idx(k);
+    rows.push(pitch.t[i].toFixed(6) + "," + pitch.m[i].toFixed(4) + "," + pitch.c[i].toFixed(4));
+  }
+  return rows.join("\n") + "\n";
+}
+
+// ---- i momenti salienti, in due formati ----
+//
+// Nessuno dei due è un formato di sessione: sono due modi di portare i punti FUORI
+// da qui, e il replay interno (fase 5c) non li usa.
+
+// WebVTT, che è la scorciatoia per rendere i punti navigabili in qualunque player
+// PRIMA che esista il replay: VLC lo mostra come sottotitoli, QuickTime e YouTube
+// come capitoli, e non serve rimuxare niente.
+//
+// `tFrom` è il tempo del grafico all'avvio della registrazione: i tempi del file
+// sono relativi all'inizio del VIDEO, non all'asse del grafico. Chi è nato prima
+// dell'inizio del video non c'è — non si può mostrare in un video che non lo
+// contiene — e i punti scartati dalla curatela nemmeno: il .vtt è l'esito della
+// curatela, non l'elenco dei candidati.
+//
+// Durata minima di un sottotitolo: 1,5 s. Un momento può durare un secondo, e a
+// un secondo un sottotitolo lampeggia e non si legge.
+export function marksVtt(marks, opt = {}) {
+  const { tFrom = 0, minS = 1.5, label = (m) => m.zona } = opt;
+  const out = ["WEBVTT", ""];
+  let n = 0;
+  for (const m of marks.slice().sort((a, b) => a.t - b.t)) {
+    const a = m.t0 - tFrom, b = Math.max(m.t1 - tFrom, a + minS);
+    if (b <= 0) continue;
+    out.push(String(++n), vttTime(Math.max(0, a)) + " --> " + vttTime(b), label(m), "");
+  }
+  return out.join("\n");
+}
+
+function vttTime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  const sec = s - h * 3600 - m * 60;
+  return `${p2(h)}:${p2(m)}:${sec < 10 ? "0" : ""}${sec.toFixed(3)}`;
+}
+
+// Il formato che conta per il futuro, e non per il player: dentro c'è la
+// CURATELA — quali punti chi ascolta ha tenuto e quali ha scartato — che è il
+// modo in cui le etichette si formeranno (per adesso ne esistono due). Accanto a
+// ogni punto ci vanno il numero e la zona: senza, un domani si saprebbe *quali*
+// sono stati tenuti ma non *quanto costavano*, che è l'unica cosa con cui si
+// possono spostare i confini con criterio. Il `meta` porta le costanti con cui
+// sono stati prodotti, perché quei confini si sposteranno.
+export function marksJson(marks, meta = {}) {
+  return JSON.stringify({
+    versione: 1,
+    ...meta,
+    momenti: marks.slice().sort((a, b) => a.t - b.t).map((m) => ({
+      t: +m.t.toFixed(3),
+      da: +m.t0.toFixed(3),
+      a: +m.t1.toFixed(3),
+      zona: m.zona,
+      val: +m.val.toFixed(3),
+      nota: isFinite(m.m) ? +m.m.toFixed(2) : null,
+      scelta: m.scelta || null,
+    })),
+  }, null, 1);
 }

@@ -28,3 +28,10 @@ build/
 *.log
 *.csv
 !firmware/**/*.csv
+
+# Le registrazioni del 4 settembre: 90 MB, di cui 89 di mp4 (uno solo da 53 MB).
+# Stanno sul disco e non si cancellano — sono le uniche etichette che esisteranno
+# mai, vedi docs/PIANO-fase6.md — ma non entrano nella storia di git: un binario
+# da 53 MB non si toglie più senza riscriverla, e il clone se lo porta dietro per
+# sempre. Come tenerle davvero (Git LFS? solo i CSV?) è una decisione rimandata.
+docs/samples/

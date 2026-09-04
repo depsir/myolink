@@ -7,20 +7,25 @@
 import "./style.css";
 
 import { S, store, spec, pitch, clock, T } from "./core/state.js";
+import { CAL } from "./core/calib.js";
 import { stop, sendCommand } from "./core/session.js";
 import { logEnvironment } from "./core/diagnostics.js";
 import { connectSerial } from "./transport/serial.js";
 import { connectBle } from "./transport/ble.js";
 import { connectDemo } from "./transport/sim.js";
 import { A, applyFft, toggleAudio } from "./audio/audio.js";
+import { TP } from "./audio/tape.js";
 import { P } from "./audio/pitch.js";
 import { PAD, resize, cssW, cssH, pitW, pitH, specW, specH } from "./draw/canvas.js";
 import { drawChart, autoY } from "./draw/chart.js";
 import { drawPitch, resetPitchRange } from "./draw/pitch.js";
 import { drawSpec } from "./draw/spec.js";
-import { R, toggleRecord, drawComposite, exportCsv } from "./record/recorder.js";
+import { R, toggleRecord, drawComposite, exportCsv, saveRecording } from "./record/recorder.js";
 import { setupPanels } from "./ui/panels.js";
 import { setupStats, updateStats } from "./ui/stats.js";
+import { lastCal, setupCalib } from "./ui/calib.js";
+import { drawStrip, marks, range as marksRange, reviewT, setupMarks } from "./ui/marks.js";
+import { FT, setupFatica, tickFatica } from "./ui/fatica.js";
 import { $, log } from "./ui/dom.js";
 
 // Il cursore avanza col clock dell'host mappato sull'asse del grafico: se i dati
@@ -29,7 +34,14 @@ import { $, log } from "./ui/dom.js";
 function timeAxis() {
   const W = Math.max(0.5, +$("win").value || 5);
   let tNow;
-  if (S.running || A.on) tNow = T.now();
+  // Il cursore di revisione vince su tutto, anche col sensore collegato: guardare
+  // un momento e vedersi trascinare via dal vivo un secondo dopo sarebbe
+  // inutilizzabile. Si esce con "dal vivo", che è un pulsante e non un timeout.
+  // Il momento sta al CENTRO della finestra e non sul bordo destro: dal vivo il
+  // bordo destro è l'adesso, in revisione l'interessante è cosa c'era attorno.
+  const rev = reviewT();
+  if (rev !== null) tNow = rev + W / 2;
+  else if (S.running || A.on) tNow = T.now();
   else if (store.n || spec.n) tNow = Math.max(store.tLast(), spec.tLast());
   else tNow = 0;
   return { W, tNow, tLeft: tNow - W };
@@ -41,6 +53,11 @@ function draw() {
   if (cssW && cssH) drawChart(ax);
   if (pitW && pitH) drawPitch(ax);
   if (specW && specH) drawSpec(ax);
+  drawStrip(ax);
+  // Il semaforo prima della composizione, perché sta in barra e non nei canvas:
+  // si limita da sé a 5 Hz (lo zero a 1 Hz), quindi chiamarlo a ogni fotogramma
+  // non costa niente.
+  tickFatica();
   // Dopo i tre pannelli: il canvas di composizione copia fotogrammi già finiti.
   if (R.on) drawComposite();
   updateStats();
@@ -48,6 +65,9 @@ function draw() {
 
 setupPanels();
 setupStats();
+setupCalib();
+setupMarks();
+setupFatica();
 
 $("btnSerial").onclick = connectSerial;
 $("btnBle").onclick = connectBle;
@@ -55,6 +75,7 @@ $("btnDemo").onclick = connectDemo;
 $("btnStop").onclick = () => stop("manuale");
 $("btnAudio").onclick = toggleAudio;
 $("btnRec").onclick = toggleRecord;
+$("btnSave").onclick = saveRecording;
 $("btnCsv").onclick = exportCsv;
 $("fft").onchange = applyFft;
 $("pauto").onchange = () => {
@@ -82,7 +103,27 @@ $("hintBox").open = window.innerWidth > 720;
 // verifiche del banco di prova (Chrome headless via CDP, vedi README) leggono lo
 // stato interno per controllare timestamp, colonne e stime. Questo è l'unico
 // punto d'accesso: esplicito, così si sa che esiste ed è quello.
-window.MyoLink = { S, T, store, spec, pitch, clock, A, P, R, PAD };
+// `CAL` con un getter e non per valore: la calibrazione si sostituisce in blocco,
+// e un valore copiato qui resterebbe quello di prima della prima calibrazione.
+// `CAL` e `calBuilt` con un getter e non per valore: si sostituiscono in blocco, e
+// un valore copiato qui resterebbe quello di prima della prima calibrazione.
+// `calBuilt` è l'ultima costruita anche se rifiutata — `CAL` solo quella attiva.
+window.MyoLink = {
+  S, T, store, spec, pitch, clock, A, P, R, PAD, TP,
+  get CAL() { return CAL; },
+  // Il semaforo della fatica dal vivo: zero, numero e zona. Dal banco di prova è
+  // il solo modo di controllare che il colore corrisponda alla misura.
+  FT,
+  get calBuilt() { return lastCal(); },
+  // I momenti salienti come li vede l'utente: è la lista dopo le due manopole,
+  // non i candidati. È il punto da leggere dal banco di prova.
+  get marks() { return marks(); },
+  get marksRange() { return marksRange(); },
+  // Il tempo su cui sono puntati i pannelli: null dal vivo, il cursore in
+  // revisione, e la posizione della riproduzione mentre si riascolta. Dal banco è
+  // il solo modo di vedere che l'audio sta davvero muovendo i grafici.
+  get reviewT() { return reviewT(); },
+};
 
 resize();
 requestAnimationFrame(draw);

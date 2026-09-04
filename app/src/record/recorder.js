@@ -11,13 +11,19 @@
 // finisce dentro il video da sé: il file mostra esattamente quello che si vedeva
 // a schermo.
 //
+// Una registrazione non è solo il video: allo stop si congelano anche i CAMPIONI
+// dell'intervallo registrato, in CSV, con lo stesso nome del file video. Il
+// perché sta in save(): lo store è un anello, e "salvo dopo" è il caso normale.
+//
 // Ambito: solo esportazione. Nessuna riapertura di sessione, nessuna timeline.
 
-import { store } from "../core/state.js";
+import { T, pitch, store } from "../core/state.js";
 import { busLive, closeBus, openBus } from "../audio/bus.js";
 import { cv, dpr, pitCv, specCv } from "../draw/canvas.js";
 import { composeLayout } from "./layout.js";
-import { emgCsv, extFor, stampName, supportedMimes, videoBitrate } from "./export.js";
+import {
+  countInRange, emgCsv, extFor, pitchCsv, stamp, supportedMimes, videoBitrate,
+} from "./export.js";
 import { $, log, setLabel } from "../ui/dom.js";
 
 const FPS = 30;
@@ -32,8 +38,21 @@ const LAYERS = [
   { key: "spec", cv: specCv, box: "recSpec" },
 ];
 
+// `t0` e `t1` sopravvivono alla fine della registrazione, e servono: sono
+// l'ancora fra il tempo del grafico e quello del video, cioè quello che permette
+// alla fase 5b di analizzare l'INTERVALLO REGISTRATO invece di tutto lo store,
+// alla 5c di saltare al punto giusto del file, e a save() di tagliare i CSV
+// esattamente sul video.
 export const R = {
-  rec: null, mime: "", chunks: [], bytes: 0, t0: 0,
+  rec: null, mime: "", chunks: [], bytes: 0, t0: 0, t1: 0,
+  // Il file finito, TENUTO invece di scaricato da sé. Lo scarica il pulsante
+  // "Salva video + CSV", e alla fase 5c è da qui che il replay prenderà il video.
+  blob: null, name: "", secs: 0,
+  // I dati della registrazione, congelati allo stop: `[{ name, blob, n, cosa }]`.
+  // Sono ciò che l'utente si aspetta trovando un pulsante "salva" dopo aver
+  // registrato — il video mostra la prova, questi la rendono rianalizzabile — e
+  // NON sono il CSV di tutta la memoria, che è un altro pulsante.
+  data: [],
   out: null, cx: null, rects: [], src: null,
   get on() { return !!this.rec; },
 };
@@ -58,6 +77,14 @@ export async function toggleRecord() {
   const L = composeLayout(layers, GAP);
   if (!L.rects.length) {
     return log("registrazione: nessuno strato da includere — spunta un pannello visibile.");
+  }
+
+  // La registrazione precedente sta in RAM e non ce ne stanno due: se non è stata
+  // salvata, lo si dice invece di buttarla in silenzio.
+  if (R.blob) {
+    log(`registrazione precedente (${dur(R.secs)}, ${fileSize(R.blob.size)}` +
+        `${R.data.length ? " + CSV" : ""}) buttata: non era stata salvata.`);
+    R.blob = null; R.name = ""; R.data = []; showSave();
   }
 
   const out = document.createElement("canvas");
@@ -101,7 +128,7 @@ export async function toggleRecord() {
     // `rec.mimeType` non dice ancora niente di nuovo (rieccheggia la richiesta),
     // perché il livello del profilo lo rinegozia quando l'encoder parte davvero.
     // Il valore vero si legge alla chiusura — vedi save().
-    rec, mime, chunks: [], bytes: 0, t0: performance.now(),
+    rec, mime, chunks: [], bytes: 0, t0: performance.now(), t1: 0,
     out, cx, rects: L.rects,
     src: Object.fromEntries(LAYERS.map((l) => [l.key, l.cv])),
   });
@@ -117,7 +144,9 @@ export async function toggleRecord() {
   rec.start(1000);
 
   drawComposite();                      // il primo fotogramma senza aspettare il raf
-  setLabel($("btnRec"), "Ferma e salva", "Stop");
+  // "Ferma" e non "Ferma e salva": allo stop il file resta in memoria, e
+  // l'etichetta non deve promettere un download che non avviene.
+  setLabel($("btnRec"), "Ferma", "Stop");
   $("btnRec").classList.add("danger");
   showInfo();
   // Il bitrate lo si rilegge dal recorder invece di ristampare quello chiesto:
@@ -165,6 +194,8 @@ function audioNote(track) {
 // fotogrammi già completi.
 export function drawComposite() {
   if (!R.cx) return;
+  // Il cronometro qui: è il posto che gira a ogni fotogramma finché si registra.
+  showInfo();
   R.cx.fillStyle = BG;
   R.cx.fillRect(0, 0, R.out.width, R.out.height);
   for (const r of R.rects) {
@@ -181,14 +212,25 @@ export function drawComposite() {
 }
 
 function save() {
-  const secs = (performance.now() - R.t0) / 1000;
+  R.t1 = performance.now();
+  const secs = (R.t1 - R.t0) / 1000;
   // Adesso — e non all'avvio — `rec.mimeType` dice cosa c'è davvero nei chunk: il
   // livello del profilo H.264 il browser lo rinegozia quando l'encoder parte
   // (chiesto `640028`, nel file `640020`), e il blob deve dichiarare il
   // contenuto, non l'intenzione. Va letto PRIMA che il reset azzeri R.rec.
   const mime = R.rec?.mimeType || R.mime;
   const blob = new Blob(R.chunks, { type: mime });
-  const name = stampName("myolink", extFor(mime));
+  // Un timbro solo per tutti i file di questa registrazione: `myolink-<data>.mp4`
+  // e `myolink-<data>.csv` si riconoscono come lo stesso pezzo di prova stando
+  // uno accanto all'altro nella cartella dei download. Timbrare ogni file per
+  // conto suo darebbe due timbri a un secondo di distanza.
+  const base = "myolink-" + stamp();
+  const name = base + "." + extFor(mime);
+  // I dati si congelano ADESSO e non al salvataggio: lo store è un anello, e a
+  // 1 kHz tiene ~7 minuti — riascoltarsi, guardare i Momenti e poi salvare
+  // vorrebbe dire trovare l'inizio della prova già mangiato da quello che è
+  // arrivato dopo. Costa qualche MB di testo accanto a un video di cento.
+  const data = snapshotData(base);
 
   // Qui i dati sono già stati consegnati (onstop arriva dopo l'ultimo
   // ondataavailable), quindi il bus si può spegnere: il microfono, se aperto,
@@ -198,25 +240,119 @@ function save() {
   R.rec = null; R.chunks = []; R.cx = R.out = null; R.rects = [];
   setLabel($("btnRec"), "Registra", "Rec");
   $("btnRec").classList.remove("danger");
-  $("recInfo").textContent = "";
+  $("recInfo").textContent = ""; shown = "";
 
   if (!blob.size) return log("registrazione: nessun dato, niente da salvare.");
-  saveBlob(blob, name);
+  // NON si scarica da sé, e il cambio è voluto: premere Stop e vedersi comparire
+  // un file nei download prima di aver guardato com'è venuto è la cosa che
+  // sembrava strana a chi lo usa — e a ragione, perché fra Stop e "lo tengo" in
+  // mezzo c'è il riascolto. Il file resta in memoria e lo scarica un pulsante.
+  R.blob = blob; R.name = name; R.data = data; R.secs = secs;
+  showSave();
   // Il bitrate MEDIO effettivo, che è l'unico numero che dice se il tetto chiesto
   // all'avvio è servito o è rimasto lì: con pannelli quasi fermi il file esce a
   // una frazione del budget, ed è quello il comportamento giusto.
-  log(`registrazione salvata: ${name} — ${secs.toFixed(1)} s, ${mb(blob.size)}` +
+  log(`registrazione pronta: ${dur(secs)}, ${fileSize(blob.size)}` +
       `, ${(blob.size * 8 / secs / 1e6).toFixed(1)} Mb/s medi, ${mime}`);
+  // Cosa c'è DENTRO la registrazione, oltre al video: è la riga che risponde alla
+  // domanda "e i dati?" senza doverli scaricare per scoprirlo.
+  if (data.length) {
+    log("   → dati dell'intervallo registrato: " +
+        data.map((f) => `${f.n.toLocaleString("it")} ${f.cosa} (${f.name})`).join(", "));
+  } else {
+    log("   ! nessun dato nell'intervallo: era registrato solo il video. " +
+        "Collega il sensore (o apri il microfono) PRIMA di premere Registra.");
+  }
+  log('   → "Momenti" la analizza; "Salva video + CSV" la porta via, tutta insieme. ' +
+      "Resta in memoria fino alla prossima registrazione o al ricaricamento della pagina.");
 }
 
+// I campioni dell'intervallo registrato, in CSV, pronti da scaricare.
+//
+// L'intervallo è quello del video: `R.t0`/`R.t1` sono tempi dell'HOST e si
+// convertono qui, perché la conversione passa dalla regressione del clock e più
+// tardi (o dopo una riconnessione) darebbe un altro intervallo. Gli estremi sono
+// gli stessi che usa la ricerca dei momenti, quindi CSV, video e punti parlano
+// dello stesso pezzo di tempo.
+//
+// Due file e non uno, come per l'export di tutta la memoria: EMG e pitch hanno
+// due basi dei tempi diverse e fonderli vorrebbe dire interpolarne uno. Un file
+// vuoto non si scrive affatto — sarebbe un dato perso travestito da intestazione.
+function snapshotData(base) {
+  const range = { t0: T.fromHost(R.t0), t1: T.fromHost(R.t1) };
+  const out = [];
+  for (const f of [
+    { name: base + ".csv", ring: store, csv: emgCsv, cosa: "campioni" },
+    { name: base + ".pitch.csv", ring: pitch, csv: pitchCsv, cosa: "stime di pitch" },
+  ]) {
+    const n = countInRange(f.ring, range);
+    if (!n) continue;
+    // Blob e non stringa: il testo di dieci minuti a 1 kHz sono ~12 MB, e come
+    // blob il browser può tenerselo fuori dalla memoria della pagina.
+    const blob = new Blob([f.csv(f.ring, range)], { type: "text/csv" });
+    out.push({ name: f.name, blob, n, cosa: f.cosa });
+  }
+  return out;
+}
+
+// Il pulsante esiste solo quando c'è qualcosa da salvare, e dice quanto pesa:
+// senza il peso non si sa se sono 3 MB o 300. Dice anche COSA porta via: il
+// dubbio "i CSV che scarico sono quelli della registrazione?" si risolve
+// sull'etichetta, non provando.
+function showSave() {
+  const b = $("btnSave");
+  b.hidden = !R.blob;
+  if (!R.blob) return;
+  // Durata e peso: la prima dice QUALE prova è, il secondo cosa costa portarsela
+  // via. Sull'etichetta corta resta il peso, che è il numero che conta quando si
+  // sta per scaricare su una rete telefonica; la durata è comunque nel log.
+  const size = fileSize(R.blob.size);
+  setLabel(b, `Salva video${R.data.length ? " + CSV" : ""} (${dur(R.secs)} · ${size})`,
+           "Salva " + size);
+}
+
+// Video e dati escono insieme, con lo stesso nome e in un clic solo: sono una
+// prova, non tre file da ricomporre a mano.
+export function saveRecording() {
+  if (!R.blob) return log("nessuna registrazione in memoria.");
+  saveBlob(R.blob, R.name);
+  for (const f of R.data) saveBlob(f.blob, f.name);
+  log(`registrazione salvata: ${R.name} — ${dur(R.secs)}, ${fileSize(R.blob.size)}` +
+      R.data.map((f) => `, ${f.name} — ${f.n.toLocaleString("it")} ${f.cosa}`).join(""));
+  // Il permesso per "più download" lo chiede Chrome la prima volta e la richiesta
+  // non spiega perché: meglio trovarne il motivo scritto qui sotto.
+  if (R.data.length) log("   → se il browser chiede il permesso per più download, sono i CSV accanto al video.");
+}
+
+// Il CSV di TUTTO quello che c'è in memoria, registrazione o no: è l'altro
+// pulsante, e la differenza va detta ogni volta nel log. Chi ha appena registrato
+// e vuole i dati *di quella prova* usa "Salva video + CSV" — questo qui gliene
+// darebbe di più, compresa la calibrazione e le prove di prima.
 export function exportCsv() {
-  if (!store.n) return log("CSV: nessun campione da esportare.");
-  const name = stampName("myolink", "csv");
-  saveBlob(new Blob([emgCsv(store)], { type: "text/csv" }), name);
-  log(`CSV salvato: ${name} — ${store.n.toLocaleString("it")} campioni`);
+  if (!store.n && !pitch.n) return log("CSV live: nessun campione in memoria.");
+  const base = "myolink-live-" + stamp();
+  if (store.n) {
+    const name = base + ".csv";
+    saveBlob(new Blob([emgCsv(store)], { type: "text/csv" }), name);
+    log(`CSV live salvato: ${name} — ${store.n.toLocaleString("it")} campioni, tutta la memoria`);
+  }
+  // Il pitch in un file a parte, e solo se c'è. Due basi dei tempi diverse non si
+  // fondono in una tabella senza interpolarne una — e serve: senza il pitch, un
+  // CSV rianalizzato a freddo non può far girare "sostegno che manca", che ha
+  // bisogno di sapere quando c'era voce.
+  if (pitch.n) {
+    const pn = base + ".pitch.csv";
+    saveBlob(new Blob([pitchCsv(pitch)], { type: "text/csv" }), pn);
+    log(`CSV live salvato: ${pn} — ${pitch.n.toLocaleString("it")} stime di pitch, tutta la memoria`);
+  }
+  if (R.blob) {
+    log('   → questi sono TUTTI i dati in memoria. Per i soli dati del video usa "Salva video + CSV".');
+  }
 }
 
-function saveBlob(blob, name) {
+// Esportata perché la scaricano anche i momenti salienti (.vtt e .json): il
+// download sta qui insieme agli altri, invece di essere rifatto là.
+export function saveBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = name;
@@ -227,11 +363,42 @@ function saveBlob(blob, name) {
 }
 
 const p2 = (n) => String(n).padStart(2, "0");
-const mb = (b) => (b / (1 << 20)).toFixed(1) + " MB";
+// Sotto il mega i kilobyte, e non `0.0 MB`: i primi chunk sono sempre piccoli, e
+// uno zero accanto a un cronometro che corre è esattamente il numero che fa
+// dubitare che stia registrando.
+const fileSize = (b) =>
+  (b < (1 << 20) ? Math.round(b / 1024) + " kB" : (b / (1 << 20)).toFixed(1) + " MB");
+const mmss = (s) => Math.floor(s / 60) + ":" + p2(Math.floor(s % 60));
 
+// La durata di una registrazione, che accanto ai mega è l'altra metà della
+// risposta a "cos'è questo file": 12 MB non dicono se sono venti secondi o tre
+// minuti, e fra due prove è la durata a farle riconoscere.
+//
+// Sotto il minuto i secondi con un decimale (`8.4 s`), sopra mm:ss (`2:24`): a
+// otto secondi "0:08" nasconde proprio la cifra che serve a capire se il
+// pulsante è stato premuto e ripremuto per sbaglio.
+const dur = (s) => (s < 60 ? s.toFixed(1) + " s" : mmss(s));
+
+// Il contatore mentre si registra. Lo muove il CICLO DI DISEGNO (vedi
+// drawComposite) e non l'arrivo dei chunk: appeso a `ondataavailable` avanzava a
+// scatti di due o tre secondi — l'encoder consegna quando gli conviene, non a
+// cadenza fissa — e un cronometro che salta si legge come un'app che si è
+// piantata. Il DOM si tocca solo quando il secondo cambia, non a 60 fps.
+let shown = "";
 function showInfo() {
-  const s = (performance.now() - R.t0) / 1000;
-  $("recInfo").textContent = `● ${Math.floor(s / 60)}:${p2(Math.floor(s % 60))} · ${mb(R.bytes)}`;
+  const s = Math.floor((performance.now() - R.t0) / 1000);
+  // La chiave è il secondo E i byte: così il peso si aggiorna appena arriva un
+  // chunk (che è quando cambia) e non si riscrive il DOM sessanta volte al
+  // secondo per mostrare lo stesso testo.
+  const key = s + "/" + R.bytes;
+  if (key === shown) return;
+  shown = key;
+  // Il peso compare quando c'è, e non come `0.0 MB`: l'encoder consegna i byte
+  // quando gli conviene — in una prova headless il primo chunk è arrivato dopo
+  // sei secondi, tutto insieme — e uno zero fermo accanto a un cronometro che
+  // corre si legge come "non sta registrando niente". Il tempo è la cosa che
+  // l'app sa con certezza a ogni fotogramma, il peso arriva dopo.
+  $("recInfo").textContent = `● ${mmss(s)}` + (R.bytes ? " · " + fileSize(R.bytes) : "");
 }
 
 // La scheda in background è il limite vero di questo approccio, non un dettaglio:

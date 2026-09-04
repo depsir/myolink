@@ -3,8 +3,10 @@
 // Servono a rispondere a "il BLE regge?" con numeri invece che a occhio.
 
 import { S, store, clock } from "../core/state.js";
+import { ACT_WIN, CAL, medianSince, norm, snr, verdict, worst } from "../core/calib.js";
 import { A } from "../audio/audio.js";
 import { P, centsStr, noteName } from "../audio/pitch.js";
+import { FT } from "./fatica.js";
 import { pThr } from "../draw/pitch.js";
 import { $ } from "./dom.js";
 
@@ -32,10 +34,57 @@ const STATS = [
       if (!A.on) return ""; return A.rms > -1 ? "bad" : A.rms > -60 ? "ok" : "warn"; }],
   ["colonne/s", () => A.on ? rate(A.cols).toFixed(0) : "—"],
   ["clip audio", () => A.clips, () => A.clips ? "bad" : "ok"],
+  // L'attivazione è la lettura per cui esiste la calibrazione: la media degli
+  // ultimi 200 ms, non il campione, perché un singolo campione non si legge e
+  // una soglia non ci si mette mai.
+  ["attivazione", actBest],
+  ["sopra il riposo", actSigma],
+  // La fatica è l'unica riga di questo gruppo che NON ha bisogno della
+  // calibrazione: lo zero se lo prende dalla sessione (vedi core/fatica.js).
+  // Qui c'è il numero esatto; il colore, che è quello che si guarda cantando,
+  // sta nel semaforo in barra.
+  ["fatica (2 s)", () => (isFinite(FT.val) ? (FT.val >= 0 ? "+" : "") + FT.val.toFixed(0) + " count" : "—"),
+    () => (FT.zona === "rosso" ? "bad" : FT.zona === "giallo" ? "warn" : FT.zona ? "ok" : "")],
+  ["calibrazione", calText, () => calCache.lvl],
   ["nota", () => (A.on && isFinite(P.m) && P.c >= pThr()) ? noteName(P.m) + " " + centsStr(P.m) : "—"],
   ["clarity", () => A.on ? P.c.toFixed(2) : "—", () => {
       if (!A.on) return ""; return P.c >= pThr() ? "ok" : P.c >= pThr() * 0.75 ? "warn" : "bad"; }],
 ];
+
+// L'unità migliore fra quelle DISPONIBILI, col nome scritto per intero: ×rif se
+// l'appoggio di riferimento è misurabile, altrimenti frazione del tetto
+// balistico, altrimenti i count grezzi sopra il riposo. Sull'obliquo esterno
+// l'appoggio del canto comodo sta spesso a pochi count dal riposo, e in quel caso
+// ×rif non esiste — ma una lettura deve esserci comunque.
+function actBest() {
+  if (!CAL.ready || !store.n) return "—";
+  const v = medianSince(store, ACT_WIN);
+  if (CAL.hasRif) return norm(v, CAL, "rif").toFixed(2) + " ×rif";
+  if (isFinite(CAL.peak)) return (100 * norm(v, CAL, "peak")).toFixed(1) + " % picco";
+  return (v - CAL.base).toFixed(0) + " count";
+}
+
+// La scala che c'è sempre appena il riposo è misurato, e quella su cui la 5b
+// ordinerà i momenti salienti: quante σ del riposo sopra il riposo.
+function actSigma() {
+  if (!CAL.ready || !store.n) return "—";
+  return norm(medianSince(store, ACT_WIN), CAL, "sigma").toFixed(1) + " σ";
+}
+
+// Il verdetto si ricalcola solo quando cambia la calibrazione o la cadenza, non
+// cinque volte al secondo: `CAL` è sostituito in blocco da useCal, quindi
+// l'identità dell'oggetto è già la chiave della cache.
+let calCache = { cal: null, hz: -1, lvl: "", txt: "—" };
+function calText() {
+  const hz = S.dtUs ? 1e6 / S.dtUs : 0;
+  if (calCache.cal !== CAL || calCache.hz !== hz) {
+    const v = CAL.ready ? verdict(CAL, { hzNow: hz }) : null;
+    calCache = v
+      ? { cal: CAL, hz, lvl: worst(v), txt: worst(v) + " · SNR " + snr(CAL).toFixed(0) }
+      : { cal: CAL, hz, lvl: "", txt: "—" };
+  }
+  return calCache.txt;
+}
 
 function rate(arr) {
   const cut = performance.now() - 2000;

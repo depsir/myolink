@@ -31,7 +31,8 @@ export async function stop(reason) {
   $("status").lastChild.textContent = "disconnesso" + (reason ? " (" + reason + ")" : "");
   for (const id of ["btnSerial", "btnBle", "btnDemo"]) $(id).disabled = false;
   $("btnStop").disabled = true;
-  log("stop: " + (reason || "manuale"));
+  log("disconnesso" + (reason ? " (" + reason + ")" : "") +
+      (S.samples ? " — i dati letti restano in memoria" : ""));
 }
 
 export async function sendCommand(text) {

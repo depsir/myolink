@@ -9,7 +9,10 @@ import { ClockFit } from "./clock.js";
 
 export const store = new Store();
 export const spec = new SpecStore();
-export const pitch = new PitchStore();
+// 262144 stime = ~87 minuti a hop 20 ms, 4 MB. La capacità di serie (32768) era
+// ~11 minuti: al limite per una canzone con le prove intorno, e su un limite così
+// il sintomo non è un errore ma il silenzioso troncamento della prima metà.
+export const pitch = new PitchStore(262144);
 export const clock = new ClockFit();
 
 // L'asse X è il tempo del DEVICE quando c'è un link — i campioni stanno dove li
@@ -32,7 +35,7 @@ export const S = {
   tUnwrap: null,         // ultimo t0_us grezzo, per lo srotolamento a 32 bit
   tAbsUs: 0,             // tempo device srotolato, in µs
   lastSeq: null,
-  dtUs: 50000,
+  dtUs: 10000,                 // 100 Hz, come il firmware di serie
   packets: 0, samples: 0,
   lostPackets: 0, lostSamples: 0, gapFlags: 0, crcErrors: 0,
   bytes: 0,

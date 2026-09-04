@@ -88,11 +88,24 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
    vincerebbe su qualunque media query. Il grip continua a scriverle inline —
    ma quella è una scelta dell'utente, e deve vincere. */
 #pEmg .body { height: 380px; }
+#pMarks .body { height: 240px; }
 #pPitch .body { height: 190px; }
 #pSpec .body { height: 320px; }
 canvas { display: block; width: 100%; height: 100%; }
 .bar .tag { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
 .bar input[type=number] { width: 60px; }
+/* Le caselle delle tre tracce sono anche la legenda: l'etichetta ha il colore
+   della riga che accende, così non serve una legenda a parte dentro il canvas —
+   che sarebbe un quarto elemento a contendersi lo stesso spazio. La fatica
+   cambia colore per zona: prende il verde, che è la zona in cui si sta quasi
+   sempre. Spenta, l'etichetta torna grigia come qualunque controllo inattivo. */
+.trk { font-size: 12px; }
+.trk.raw { color: #4ea1ff; }
+.trk.med { color: var(--fg); }
+.trk.fat { color: var(--ok); }
+.trk:has(input:not(:checked)) { color: var(--dim); }
+.trk.med input { accent-color: var(--fg); }
+.trk.fat input { accent-color: var(--ok); }
 .fold { width: 22px; padding: 3px 0; line-height: 1; font-size: 10px; text-align: center; }
 .panel.folded .fold::before { content: "\25B8"; }    /* ▸ chiuso */
 .fold::before { content: "\25BE"; }                   /* ▾ aperto */
@@ -126,6 +139,126 @@ canvas { display: block; width: 100%; height: 100%; }
 .hint summary { cursor: pointer; }
 .hint code { background: var(--panel); padding: 1px 5px; border-radius: 4px; color: var(--fg); }
 
+/* ============================== calibrazione ==============================
+   Quattro blocchi cronometrati in un <dialog>: la modalità la dà il browser, e
+   con lei Esc e il backdrop, che fatti a mano sarebbero tre stati in più. */
+dialog.cal {
+  background: var(--panel); color: var(--fg); font: inherit;
+  border: 1px solid var(--line); border-radius: 10px;
+  width: calc(100% - 24px); max-width: 640px; padding: 16px 18px;
+  /* Su un telefono i quattro blocchi col loro testo superano l'altezza dello
+     schermo: scorre il dialog, esplicitamente, invece di fidarsi del foglio di
+     stile del browser — che i pulsanti in fondo restino raggiungibili non è un
+     dettaglio da lasciare a un default. */
+  max-height: calc(100% - 24px); overflow-y: auto;
+}
+dialog.cal::backdrop { background: #000000cc; }
+dialog.cal h2 { margin: 0 0 8px; font-size: 15px; }
+.calWhy { color: var(--dim); font-size: 12px; margin: 0 0 14px; }
+.calWhy b { color: var(--fg); font-weight: 600; }
+#calSteps { margin: 0; padding-left: 20px; display: grid; gap: 11px; }
+#calSteps li::marker { color: var(--dim); }
+.calTop { display: flex; align-items: center; gap: 8px; }
+.calState { color: var(--dim); font-size: 12px; }
+li.done .calState { color: var(--ok); }
+li.run .calState { color: var(--acc); }
+.calRedo { margin-left: auto; padding: 2px 8px; font-size: 11px; }
+.calHint { margin: 2px 0 0; color: var(--dim); font-size: 12px; }
+/* I numeri del blocco accanto al blocco: è la risposta a "quale dei quattro è
+   quello strano", che nel solo referto finale si scopre troppo tardi. */
+.calSum { margin: 3px 0 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--acc); }
+.calSum:empty { display: none; }
+
+/* Il livello dal vivo: serve a sapere che il sensore è attaccato PRIMA di
+   cominciare, che è metà delle calibrazioni venute male. */
+.calLive { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.calBarBox {
+  flex: 1; height: 10px; background: #0d1117; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 5px;
+}
+#calBar { width: 0; height: 100%; background: var(--acc); }
+#calVal, #calNow { font-variant-numeric: tabular-nums; }
+#calVal { color: var(--dim); font-size: 12px; min-width: 82px; }
+#calNow { color: var(--acc); font-size: 17px; min-width: 132px; text-align: right; }
+/* A riposo il countdown è vuoto: su schermo stretto sta su una riga sua, e vuota
+   quella riga sarebbe uno spazio senza ragione. */
+#calNow:empty { display: none; }
+#calVerdict { margin: 10px 0 0; display: grid; gap: 5px; font-size: 12px; }
+#calVerdict:empty { display: none; }
+#calVerdict div { padding-left: 2px; }
+#calVerdict .ok { color: var(--ok); }
+#calVerdict .warn { color: var(--warn); }
+#calVerdict .bad { color: var(--bad); }
+#calMsg { margin: 10px 0 0; font-size: 12px; }
+#calMsg.warn { color: var(--warn); }
+#calMsg.ok { color: var(--ok); }
+#calMsg:empty { display: none; }
+.calBtns { display: flex; gap: 8px; margin-top: 16px; }
+#calClose { margin-left: auto; }
+
+/* ============================== momenti salienti ==============================
+   Due comandi in barra e, nel corpo, la striscia sopra e la lista sotto. La
+   striscia ha altezza fissa: è una mappa, non un grafico da ridimensionare, e
+   tutto lo spazio che si guadagna tirando il grip va alla lista. */
+.mkBody { display: flex; flex-direction: column; }
+#strip { flex: 0 0 74px; height: 74px; }
+#mkList { flex: 1; overflow-y: auto; border-top: 1px solid var(--line); }
+/* La legenda delle tre zone: non sono filtri da spegnere, sono la scala. Il
+   quadratino è quello che lega la legenda al nastro nella striscia, alla riga
+   della lista e alla banda sul grafico, senza doverlo scrivere. */
+.mkWant { display: inline-flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.zlab { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.zlab i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 4px 0 2px; }
+
+/* Una riga per momento: tempo, NUMERO, zona e durata, nota, e i due bottoni
+   della curatela. Il numero c'è ed è in colore: la 5b lo nascondeva di proposito
+   («inviterebbe a regolarlo»), e nascondeva così l'unica informazione che
+   distingue una canzone con quattro punti caldi da una che va bene. */
+.mk {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px; cursor: pointer;
+  border-bottom: 1px solid #1a1f27; font-size: 12.5px;
+}
+.mk:hover { background: #1b222c; }
+.mk.sel { background: #1d2b3a; }
+.mk i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+.mk b { font-variant-numeric: tabular-nums; min-width: 3.4em; }
+.mk .mkV { font-family: ui-monospace, monospace; font-weight: 600; min-width: 3em; font-variant-numeric: tabular-nums; }
+.mk .mkT { color: var(--dim); }
+.mk .mkN2 { margin-left: auto; color: var(--acc); font-family: ui-monospace, monospace; }
+.mk .mkKeep, .mk .mkDrop { padding: 1px 7px; font-size: 11px; line-height: 1.3; min-height: 0; }
+.mk.keep { background: #10251a; }
+.mk.keep .mkKeep { border-color: var(--ok); color: var(--ok); }
+/* Scartato NON vuol dire rimosso: la riga resta, spenta, perché un clic sbagliato
+   in una lista di venti righe non deve far sparire quello che stavi guardando. */
+.mk.drop { opacity: .45; }
+.mk.drop .mkT, .mk.drop b { text-decoration: line-through; }
+.mk.drop .mkDrop { border-color: var(--bad); color: var(--bad); }
+/* La lista vuota non è un errore né una manopola da alzare: è il risultato di
+   una presa tenuta dentro il verde, e va detto così. */
+#mkList:empty::after {
+  content: "nessun momento fuori dal verde in questa presa.";
+  display: block; padding: 10px; color: var(--dim); font-size: 12px;
+}
+
+/* ============================== il semaforo della fatica ==============================
+   Grande e in barra, perché si guarda MENTRE si canta e da lontano. Il colore
+   non è mai solo: dentro c'è sempre la parola (verde/giallo/rosso) e il numero,
+   che è quello che serve a chi il verde dal rosso non lo distingue — e in un
+   semaforo a tre colori è la combinazione peggiore possibile. */
+.fatica {
+  font-family: ui-monospace, monospace; font-weight: 600; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 10px; border-radius: 999px; min-width: 6.5em; text-align: center;
+  color: var(--dim); background: #1b2029; border: 1px solid var(--line);
+  transition: background .25s linear, color .25s linear, border-color .25s linear;
+}
+.fatica[data-zona=verde]  { color: var(--ok);   background: #10251a; border-color: #1d4a2c; }
+.fatica[data-zona=giallo] { color: var(--warn); background: #2a2110; border-color: #5a4415; }
+/* Il rosso è pieno e non tinteggiato: è raro — nelle quattro registrazioni lo
+   tocca solo l'errore confermato — e quando arriva deve interrompere la lettura. */
+.fatica[data-zona=rosso]  { color: #0e1116; background: var(--bad); border-color: var(--bad); }
+@media (prefers-reduced-motion: reduce) { .fatica { transition: none; } }
+
 /* ============================== tocco ==============================
    Vale per larghezza ridotta ma anche per un tablet largo: il dito è lo stesso.
    40px è il minimo con cui un pollice prende un bersaglio senza guardarlo. */
@@ -141,6 +274,15 @@ canvas { display: block; width: 100%; height: 100%; }
      l'area che prende il dito. */
   .grip { height: 22px; }
   .grip::after { width: 56px; height: 3px; margin: 9.5px auto; }
+  /* Le righe dei momenti crescono per il dito, ma i loro due bottoni restano
+     piccoli: a 40px per lato la riga diventerebbe due righe. */
+  .mk { padding: 9px 10px; font-size: 13px; }
+  .mk .mkKeep, .mk .mkDrop { min-height: 28px; padding: 3px 10px; }
+  .bar input[type=range] { width: 100px; }
+  .calRedo { min-height: 32px; padding: 4px 10px; }
+  /* Il countdown va a capo prima di stringersi: è il numero che si guarda. */
+  .calLive { flex-wrap: wrap; }
+  #calNow { min-width: 100%; text-align: left; }
 }
 
 /* ============================== cassetti ==============================

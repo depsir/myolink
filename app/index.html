@@ -27,22 +27,30 @@
     <button id="btnSerial" class="primary"><span class="lg">Collega seriale</span><span class="sm">Seriale</span></button>
     <button id="btnBle" class="primary"><span class="lg">Collega BLE</span><span class="sm">BLE</span></button>
     <button id="btnDemo"><span class="lg">Simulatore</span><span class="sm">Demo</span></button>
-    <button id="btnStop" class="danger" disabled>Stop</button>
+    <!-- "Disconnetti" e non "Stop": chiude il link col device, non "mette in pausa"
+         la lettura. Chiamarlo Stop accanto a Registra faceva pensare a due stop
+         della stessa cosa, e non lo sono. -->
+    <button id="btnStop" class="danger" disabled><span class="lg">Disconnetti</span><span class="sm">Disc.</span></button>
     <div class="sep"></div>
     <button id="btnAudio"><span class="lg">Microfono</span><span class="sm">Mic</span></button>
     <div class="sep"></div>
     <button id="btnRec"><span class="lg">Registra</span><span class="sm">Rec</span></button>
     <span class="tag rec" id="recInfo"></span>
+    <button id="btnSave" class="primary" hidden title="scarica il video e i CSV dell'intervallo registrato"><span class="lg">Salva video + CSV</span><span class="sm">Salva</span></button>
   </div>
 
   <div class="hrow cfg">
     <div class="sep"></div>
     <!-- vale per entrambi i pannelli audio: sono timbrati dallo stesso orologio -->
-    <label>offset <input type="number" id="aoff" value="0" step="5"> ms</label>
+    <label>offset audio <input type="number" id="aoff" value="0" step="5"> ms</label>
+    <!-- L'inviluppo del MyoWare è hardware e causale: SEGUE il muscolo di qualche
+         decina di ms. Questo lo riallinea nel disegno; i campioni e il CSV restano
+         come li ha timbrati il firmware. -->
+    <label>EMG <input type="number" id="eoff" value="0" step="10"> ms</label>
     <div class="sep"></div>
     <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
     <div class="sep"></div>
-    <label>Hz <input type="number" id="rate" value="20" min="1" max="2000" step="1"></label>
+    <label>Hz <input type="number" id="rate" value="100" min="1" max="2000" step="1"></label>
     <button id="btnRate">Applica</button>
     <div class="sep"></div>
     <!-- Quali pannelli finiscono nel video: decidono anche quanto è alto il file. -->
@@ -50,7 +58,15 @@
     <label><input type="checkbox" id="recEmg" checked> sensore</label>
     <label><input type="checkbox" id="recPitch" checked> pitch</label>
     <label><input type="checkbox" id="recSpec" checked> spettro</label>
-    <button id="btnCsv" title="campioni EMG in CSV: tempo e valore">CSV</button>
+    <!-- Tutta la memoria, non la registrazione: quella ha i suoi CSV dentro
+         "Salva video + CSV", e i due esiti sono diversi abbastanza da dover
+         avere due nomi diversi. -->
+    <button id="btnCsv" title="tutti i campioni in memoria, registrazione o no: la registrazione ha i suoi CSV">CSV live</button>
+    <div class="sep"></div>
+    <!-- Il settimo pulsante non sta nella riga di connessione: la fase 4 aveva
+         lasciato scritto che il prossimo andava nel cassetto, ed è questo. -->
+    <button id="btnCal" title="riposo, massimo, accenti, riferimento: dà un'unità ai count">Calibra</button>
+    <button id="btnMarks" title="cerca i momenti fuori dalla zona verde in quello che hai registrato, col loro numero">Momenti</button>
     <div class="grow"></div>
   </div>
 </header>
@@ -71,11 +87,24 @@
     <div class="bar">
       <button class="fold" title="comprimi"></button>
       <span class="tag">sensore</span>
+      <!-- Il semaforo della fatica: fuori dal cassetto dei controlli, perché è la
+           cosa che si guarda MENTRE si canta e su un telefono il cassetto è chiuso. -->
+      <span id="fatica" class="fatica">—</span>
       <button class="tools" aria-expanded="false" aria-label="controlli"></button>
       <div class="ctl">
         <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
         <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
         <button id="btnAuto">Auto Y</button>
+        <div class="sep"></div>
+        <!-- Le tre tracce si accendono e si spengono una per una: sono tre cose
+             diverse sovrapposte, e spesso se ne guarda una sola — la nuvola dei
+             grezzi copre le altre due quando si cerca un artefatto, e la linea
+             colorata da sola è la lettura che va nel video. L'etichetta ha il
+             colore della sua riga, così la casella è anche la legenda. -->
+        <span class="tag">tracce</span>
+        <label class="trk raw" title="i campioni come li ha timbrati il firmware"><input type="checkbox" id="trRaw" checked> grezza</label>
+        <label class="trk med" title="mediana a 300 ms: la linea su cui lavorano i rilevatori"><input type="checkbox" id="trMed" checked> mediana</label>
+        <label class="trk fat" title="mediana a 2 s meno il riposo, col colore della zona — con le sue due righe a +30 e +55"><input type="checkbox" id="trFat" checked> fatica</label>
       </div>
     </div>
     <div class="body"><canvas id="chart"></canvas></div>
@@ -125,6 +154,34 @@
     <div class="grip"></div>
   </section>
 
+  <!-- I momenti salienti. Non è un quarto pannello dell'asse dei tempi: la
+       striscia rappresenta TUTTA la registrazione, ed è quello a soddisfare il
+       "vedere al volo su cinque minuti" — una lista da scorrere no. I comandi
+       sono due e stanno qui: quanti punti vuoi, e cosa stai cercando. -->
+  <section class="panel" id="pMarks" hidden>
+    <div class="bar">
+      <button class="fold" title="comprimi"></button>
+      <span class="tag">momenti</span>
+      <button class="tools" aria-expanded="false" aria-label="controlli"></button>
+      <div class="ctl">
+        <!-- La legenda ha preso il posto dello slider "quanti" e delle tre caselle:
+             con un rilevatore solo non c'è niente da scegliere, e la lista può
+             essere vuota — che su una presa pulita è il risultato giusto. -->
+        <span id="mkWant" class="mkWant"></span>
+        <button id="mkPlay" disabled>▶ ascolta</button>
+        <button id="mkLive" hidden>dal vivo</button>
+        <button id="btnMkVtt" title="capitoli/sottotitoli per VLC, QuickTime, YouTube">.vtt</button>
+        <button id="btnMkJson" title="i punti con la curatela dentro: è il dataset con cui si tarerà">.json</button>
+        <span class="tag" id="mkInfo"></span>
+      </div>
+    </div>
+    <div class="body mkBody">
+      <canvas id="strip"></canvas>
+      <div id="mkList"></div>
+    </div>
+    <div class="grip"></div>
+  </section>
+
   <div id="stats"></div>
   <div id="log"></div>
   <details class="hint" id="hintBox">
@@ -135,18 +192,75 @@
       Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
       Se qualcosa non parte, la prima riga del log dice quali API ci sono e in che stato è il permesso del
       microfono; quando una richiesta fallisce, sotto l'errore compare dove guardare.
-      <code>offset</code> compensa la latenza di acquisizione audio, che il browser non espone: battendo
-      un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano.
+      <code>offset audio</code> compensa la latenza di acquisizione audio, che il browser non espone:
+      battendo un colpo sul sensore si vede l'artefatto EMG e il transiente sonoro, e si allineano a mano;
+      <code>EMG</code> fa lo stesso per il ritardo dell'inviluppo del sensore, che è hardware e segue il
+      muscolo — sposta il disegno, non i dati.
+      <em>Calibra</em> misura riposo, massimo e appoggio di riferimento: senza, i count non hanno unità e
+      sul grafico non compaiono le due righe tratteggiate del riposo e del riferimento.
+      Il <strong>semaforo della fatica</strong> invece non ha bisogno di calibrazione: il suo zero è il
+      5° percentile del livello sugli ultimi due minuti, e servono una ventina di secondi di storia
+      prima che si accenda. Legge una finestra di 2&nbsp;s, quindi è in ritardo di circa un secondo su
+      quello che descrive — e le fasce del grafico, la linea colorata e i momenti dicono tutti lo
+      stesso numero. I due confini (+30 e +55 count sopra il riposo) sono tarati su una sessione sola:
+      spostando gli elettrodi vanno rifatti.
+      Le tre caselle <code>tracce</code> nella barra del sensore accendono e spengono le tre letture
+      sovrapposte — i campioni grezzi, la mediana a 300&nbsp;ms, la linea della fatica con le sue due righe:
+      partono accese, e quello che spegni qui non finisce nemmeno nel video.
       Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
       aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
       fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
-      <em>Registra</em> salva un <code>.mp4</code> con i pannelli spuntati sotto ⚙ e l'audio del microfono, se
-      è aperto: la sincronia la garantisce il registratore, non serve allineare niente. Mentre registri
+      <em>Disconnetti</em> chiude il link col device: i dati già letti restano in memoria, e i grafici
+      si fermano sull'ultimo campione.
+      <em>Registra</em> prepara un <code>.mp4</code> con i pannelli spuntati sotto ⚙ e l'audio del microfono, se
+      è aperto: la sincronia la garantisce il registratore, non serve allineare niente. Allo stop il file
+      <strong>resta in memoria</strong> insieme ai <strong>CSV dell'intervallo registrato</strong>, e
+      <em>Salva video + CSV</em> li scarica insieme, con lo stesso nome — prima puoi guardarti i
+      <em>Momenti</em> e decidere. Mentre registri
       <strong>non cambiare scheda</strong> — il disegno si ferma e il video prende un fotogramma lunghissimo.
-      <em>CSV</em> esporta i campioni EMG in memoria, l'unico formato con cui una sessione si rianalizza.
+      <em>CSV live</em> è l'altro caso: tutti i campioni in memoria (EMG e pitch in due file, perché hanno due
+      basi dei tempi), registrazione o no. Il CSV è l'unico formato con cui una prova si rianalizza.
+      <em>Momenti</em> cerca i punti caldi nella registrazione appena fatta: due comandi, <code>quanti punti</code>
+      e cosa cerchi, e nessuna soglia — i punti sono ordinati rispetto a questa registrazione, non a una scala
+      assoluta. La striscia è tutta la registrazione: cliccala per guardare lì, <code>n</code> e <code>p</code>
+      per il punto dopo e quello prima, <code>✓/✗</code> per tenere o scartare. I falsi positivi sono voluti:
+      chi ascolta filtra meglio di qualunque soglia. <em>Registra</em> non serve: senza registrazione si
+      analizza quello che viene dopo la calibrazione, e c'è scritto nella barra del pannello.
+      Col microfono aperto, <code>▶ ascolta</code> (o la barra spaziatrice) risente l'audio dal cursore in
+      avanti e i tre pannelli scorrono con lui.
     </p>
   </details>
 </main>
+
+<!-- La calibrazione sta in un <dialog> e non in un pannello per una ragione
+     precisa: durante un blocco cronometrato non si deve poter toccare altro, e la
+     modalità la dà il browser invece di un overlay fatto a mano. Esc annulla. -->
+<dialog id="calDlg" class="cal">
+  <h2>Calibrazione</h2>
+  <p class="calWhy">
+    Il count del MyoWare non ha unità: dipende da pelle, elettrodi, guadagno e tessuto, quindi
+    <em>800</em> vuol dire cose diverse su due persone e su due sessioni della stessa persona.
+    Questi quattro blocchi misurano gli estremi una volta, e da lì il segnale si legge in
+    <b>×rif</b> — multipli del tuo appoggio normale — e in <b>%max</b>.
+    Il sensore va sull'addome laterale, allineato alle fibre dell'obliquo esterno: diagonali,
+    verso il basso e l'avanti.
+  </p>
+  <ol id="calSteps"></ol>
+  <div class="calLive">
+    <div class="calBarBox"><div id="calBar"></div></div>
+    <span id="calVal"></span>
+    <span id="calNow"></span>
+  </div>
+  <p id="calMsg"></p>
+  <!-- Il verdetto sta QUI e non solo nel log: il dialog è modale, quindi mentre
+       si calibra il log è dietro e irraggiungibile. -->
+  <div id="calVerdict"></div>
+  <div class="calBtns">
+    <button id="calRun" class="primary">Avvia</button>
+    <button id="calClear">Azzera</button>
+    <button id="calClose">Chiudi</button>
+  </div>
+</dialog>
 
 <script type="module" src="/src/main.js"></script>
 </body>

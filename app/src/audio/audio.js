@@ -11,6 +11,7 @@
 import { spec, pitch, T } from "../core/state.js";
 import { P, PITCH_FFT, PITCH_HOP, setupYin, yin } from "./pitch.js";
 import { micAttach, micDetach } from "./bus.js";
+import { TP, tapeClose, tapeOpen } from "./tape.js";
 import { logFail, micPermission, MIC_HINT } from "../core/diagnostics.js";
 import { resize } from "../draw/canvas.js";
 import { $, log, setLabel } from "../ui/dom.js";
@@ -69,6 +70,12 @@ export async function toggleAudio() {
     $("pitchInfo").textContent = setupYin(A.sampleRate);
     A.pTimer = setInterval(capturePitch, PITCH_HOP);
 
+    // Il nastro: da qui in avanti l'audio si può riascoltare senza aver premuto
+    // Registra. Il timbro è quello del grafico e con lo stesso `offset audio` con
+    // cui si disegnano le colonne, così l'orecchio e l'occhio guardano lo stesso
+    // istante.
+    tapeOpen(A.ctx, A.src, (h) => T.fromHost(h - (+$("aoff").value || 0)));
+
     A.stream.getAudioTracks()[0].addEventListener("ended", () => { if (A.on) closeAudio("sorgente chiusa"); });
     // Il flusso lo vede anche il bus della registrazione, che è chi lo mette nel
     // file: se una registrazione è già in corso, da qui in avanti si sente.
@@ -89,6 +96,9 @@ export async function toggleAudio() {
 }
 
 function releaseAudio() {
+  // Solo la cattura: il nastro già acquisito resta riascoltabile, come il
+  // pannello che resta visibile.
+  tapeClose();
   if (A.timer) { clearInterval(A.timer); A.timer = null; }
   if (A.pTimer) { clearInterval(A.pTimer); A.pTimer = null; }
   // Prima di fermare le tracce: la registrazione in corso torna a registrare
@@ -134,6 +144,10 @@ export function applyFft() {
 function captureColumn() {
   const a = A.analyser;
   if (!a) return;
+  // Durante il riascolto la cattura non deve scrivere negli store: quello che
+  // entra dal microfono è la registrazione stessa che suona dalle casse, e
+  // finirebbe nello spettrogramma come se fosse adesso.
+  if (TP.playing) return;
   const hostMs = performance.now();
   a.getByteFrequencyData(A.freq);
   a.getFloatTimeDomainData(A.time);
@@ -159,7 +173,7 @@ function captureColumn() {
 
 function capturePitch() {
   const a = A.pAn;
-  if (!a) return;
+  if (!a || TP.playing) return;
   const hostMs = performance.now();
   a.getFloatTimeDomainData(A.pTime);
   const r = yin(A.pTime);

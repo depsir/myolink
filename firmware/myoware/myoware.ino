@@ -44,7 +44,11 @@
 // ------------------------------- configurazione -------------------------------
 
 #define MYO_PIN A0             // uscita ENV del MyoWare
-#define MYO_PERIOD_US 50000UL  // 20 Hz
+// 100 Hz. Era 20, che bastava a vedere la linea muoversi ma non a leggere il
+// livello: la misura della fatica lavora su una mediana a 300 ms, e a 20 Hz
+// quella finestra contiene sei campioni. A 100 Hz ne contiene trenta, e la banda
+// del fenomeno (sotto i 3 Hz) resta comodamente dentro Nyquist.
+#define MYO_PERIOD_US 10000UL  // 100 Hz
 
 // 1 = ignora l'ADC e genera una linea finta in 0..1000, per provare tutta la
 // catena senza il sensore attaccato. Ricordati di rimetterlo a 0.

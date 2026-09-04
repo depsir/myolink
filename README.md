@@ -14,12 +14,13 @@ funziona da solo.
 firmware/myoware/myoware.ino   sketch unico: seriale + BLE, sceglie da solo (vedi sotto)
 firmware/myoware/myolink.h     campionamento + formato pacchetto
 app/                           ricevitore web (Vite): grafico live, pitch, spettrogramma, statistiche
-app/src/core/                  protocollo, clock, store, ingestione — senza DOM, quindi testabili
-app/src/audio/                 acquisizione microfono e YIN
+app/src/core/                  protocollo, clock, store, ingestione, calibrazione, fatica, momenti — senza DOM, quindi testabili
+app/src/audio/                 acquisizione microfono, YIN, e il nastro per riascoltare
 app/src/draw/                  i tre canvas, che condividono l'asse dei tempi
 app/src/record/                registrazione video+audio ed export CSV
+app/tools/                     i moduli veri su un CSV già registrato, e il banco di prova in Chrome headless
 app/test/                      test unitari (vitest)
-docs/PIANO.md                  piano di lavoro in quattro fasi
+docs/PIANO.md                  piano di lavoro per fasi, con le misure da cui vengono le costanti
 ```
 
 ## Avvio rapido
@@ -31,7 +32,7 @@ colleghi. Tutto ciò che si tocca sta in cima al `.ino`:
 | define | default | cosa fa |
 |---|---|---|
 | `MYO_PIN` | `A0` | ingresso analogico (uscita ENV del MyoWare) |
-| `MYO_PERIOD_US` | `50000` | periodo di campionamento, 50 ms = 20 Hz |
+| `MYO_PERIOD_US` | `10000` | periodo di campionamento, 10 ms = 100 Hz |
 | `MYO_SIMULATE` | `0` | `1` = linea finta invece dell'ADC, `0` = sensore reale |
 | `MYO_SIM_MAX` | `1000` | fondo scala del segnale simulato |
 | `MYO_ENABLE_SERIAL` | `1` | compila il trasporto seriale |
@@ -45,7 +46,11 @@ che rimbalza sui bordi invece di saturare, così un clipping vero non si confond
 col simulatore.
 
 **App.** Pronta all'uso su <https://myolink.vercel.app>, in Chrome o Edge:
-*Collega seriale* (desktop) oppure *Collega BLE* (desktop e Android).
+*Collega seriale* (desktop) oppure *Collega BLE* (desktop e Android). Collegato,
+la lettura è continua e non si mette in pausa: *Disconnetti* chiude il link — i
+dati già letti restano in memoria, e i grafici si fermano sull'ultimo campione.
+Registrare è una cosa a parte, e si può accendere e spegnere quante volte si vuole
+mentre il link resta aperto.
 
 Per modificarla:
 
@@ -71,6 +76,15 @@ headless via CDP legge lo stato da lì.
 
 Il campo **Y** va messo `0`–`1000` col simulatore del firmware e `0`–`4095` col
 sensore reale (ADC a 12 bit); il pulsante *Auto Y* lo calcola sui dati visibili.
+
+Le tre caselle **`tracce`** accendono e spengono le tre letture sovrapposte del
+segnale — `grezza` i campioni, `mediana` la mediana a 300 ms, `fatica` la linea
+colorata per zona con le sue due righe a +30 e +55. Partono tutte accese e non si
+ricordano: si spegne quello che copre il resto *mentre* si guarda. La nuvola dei
+grezzi nasconde le altre due proprio quando servono, e la linea della fatica —
+2 px e opaca — copre la mediana ogni volta che il segnale è fermo. Il numero in
+alto a sinistra resta anche a tracce tutte spente: è la lettura, non una traccia.
+**Il video segue le caselle**, perché il registratore copia questo canvas.
 
 Il pulsante **Simulatore** è una cosa diversa da `MYO_SIMULATE`: genera i
 pacchetti *dentro il browser*, con perdite e stalli radio artificiali, e serve
@@ -192,9 +206,21 @@ alla partenza, perché un `MediaRecorder` non cambia risoluzione a metà stream.
 Se durante la registrazione ridimensioni un pannello, il video lo scala dentro lo
 spazio che aveva; se lo comprimi, la sua banda resta fondo.
 
-**CSV.** Il pulsante *CSV* esporta i campioni EMG in memoria — `t_s,valore`, con
-il tempo a microsecondi, che è la risoluzione a cui timbra il firmware. È l'unico
-output con cui una sessione si **rianalizza**: un video non lo è.
+**I dati escono in CSV, e sono due casi diversi.** `t_s,valore` con il tempo a
+microsecondi, che è la risoluzione a cui timbra il firmware; è l'unico output con
+cui una prova si **rianalizza**, perché un video non lo è.
+
+- **I dati della registrazione** stanno dentro la registrazione: allo stop l'app
+  congela i campioni dell'intervallo registrato, e *Salva video + CSV* scarica
+  tutto insieme — `myolink-<data>.mp4`, `myolink-<data>.csv` e, se il microfono
+  era aperto, `myolink-<data>.pitch.csv`. Stesso timbro nel nome, così i tre file
+  si riconoscono come lo stesso pezzo di prova stando uno accanto all'altro.
+  Si congelano allo **stop** e non al salvataggio: lo store è un anello, e a 1 kHz
+  tiene ~7 minuti — riascoltarsi, guardare i *Momenti* e poi salvare troverebbe
+  l'inizio della prova già mangiato da quello che è arrivato dopo.
+- **Tutta la memoria** è l'altro pulsante, *CSV live*: quello che c'è negli store
+  in questo momento, registrazione o no, calibrazione compresa. Serve a
+  rianalizzare una sessione intera; per i dati *di quella prova* c'è il primo.
 
 **Se qualcosa non parte.** La prima riga del log dice quali API ci sono e in che
 stato è il permesso del microfono; quando una richiesta fallisce, sotto
@@ -455,13 +481,308 @@ indipendenti dall'app.
 
 `MYO_BLE_BATCH 1` produce pacchetti da 16 byte, che entrano anche nell'MTU
 minimo di default (23 → 20 byte di payload): funziona con qualsiasi central
-senza negoziazione. A 20 Hz sono 20 notify/s, nulla per il BLE. Alzalo solo
+senza negoziazione. A 100 Hz sono 100 notify/s, nulla per il BLE. Alzalo solo
 sopra i ~200 Hz **e** dopo aver verificato l'MTU negoziato — payload = MTU−3,
 e servono 14 + 2·N byte. L'app mostra la dimensione del pacchetto ricevuto, e
 il controllo CRC becca l'eventuale troncamento.
 
 Il device chiede un connection interval di 7.5–15 ms, ma il central può
 rifiutare: macOS e iOS tendono a stare su 15 ms, Android scende più in basso.
+
+## Calibrazione
+
+Il count del MyoWare **non ha unità**: dipende da impedenza cutanea, posizione
+degli elettrodi, guadagno e tessuto, quindi `800` significa cose diverse su due
+persone e su due sessioni della stessa persona. Il pulsante *Calibra* (sotto ⚙)
+misura gli estremi una volta, e da lì il segnale si legge normalizzato.
+
+Il sensore va sull'**addome laterale**, allineato alle fibre dell'obliquo
+esterno — diagonali, verso il basso e l'avanti. È un muscolo del *sostegno del
+fiato*, non della tensione laringea: "troppo" vuol dire spinta o appoggio
+premuto, "troppo poco" vuol dire fiato non sostenuto.
+
+Quattro blocchi cronometrati, ognuno con due secondi di *preparati* davanti:
+
+| blocco | cosa si fa | cosa se ne ricava |
+|---|---|---|
+| riposo, 10 s | fermo, respiro tranquillo | la **base** (mediana) e il **rumore** |
+| massimo **tenuto**, 3 × 4 s | `"sssh"` continua per tutti i 4 s, espirando fino a svuotarsi | il **plateau sostenibile**: mediana delle tre prove |
+| accenti **secchi**, 10 s | cinque `"SH!"` (o `"HA!"`) staccati | la **forma** di un'attivazione pulita — picco, salita, durata — e il tetto **istantaneo** |
+| riferimento, 8 s | una frase comoda a mezzo volume | l'**appoggio normale** |
+
+Il massimo non è un MVC anatomico (una flessione del tronco contro resistenza è
+scomoda e poco ripetibile) ma un massimo **funzionale**, che sta già nel gesto
+del cantante. Le tre prove non si concatenano da sole: dopo un'espirazione
+forzata serve respirare, e quanto non lo può indovinare un timer.
+
+**I due tetti differiscono di molto, e non è un difetto.** Su una registrazione
+vera il tenuto arrivava a +42 count (l'1% della scala dell'ADC) e l'accento a
++808 (il 20%): **17 volte**. Un colpo balistico raggiunge un'ampiezza che non si
+riesce a tenere. Quindi i due servono a due cose: l'**accento** risponde a "il
+sensore vede questo muscolo?" ed è lui il riferimento dell'SNR; il **tenuto**
+resta il denominatore di `%max`, perché è il massimo *sostenibile* ed è quello
+confrontabile con una frase cantata, che è sostenuta. Quando il tenuto è molto
+più debole dell'accento il verdetto lo dice, e dice la conseguenza: `%max` è una
+scala debole, si usa `×rif`.
+
+**Tenuto e colpo non si possono scambiare fra i blocchi due e tre.** Un colpo balistico raggiunge un'ampiezza istantanea più alta di
+quanta se ne riesca a tenere, e il blocco del massimo misura il plateau con una
+media mobile a **1 secondo**: uno `"SH!"` da 200 ms messo lì viene diluito cinque
+volte, il "massimo" scende vicino al rumore e non si costruisce nessuna scala.
+Per questo la stessa registrazione si legge con due finestre, 1 s e 0.2 s: il
+rapporto fra le due distingue un tenuto da un colpo, e il verdetto dice quale dei
+due hai fatto invece di limitarsi a rifiutare.
+
+Tre letture, e non tutte esistono sempre:
+
+- **×rif** — multipli dell'appoggio normale (`1.80` è "il 180% del tuo normale").
+- **%max** — frazione del tenuto massimale.
+- **σ** — quante deviazioni standard del riposo sopra il riposo. Non chiede nessun
+  gesto oltre ai dieci secondi di fermo, quindi **c'è sempre**.
+
+Le prime due possono restare **spente**, e non è un guasto: sull'obliquo esterno
+l'appoggio di una frase cantata comoda sta a pochi count dal riposo, e una
+contrazione volontaria tenuta può essere piccola. Il verdetto dice quale delle due
+è spenta e perché, la lettura continua nell'unità che resta, e la calibrazione
+resta valida — basta che il **riposo** sia misurato. Sul grafico compare la riga
+del riposo, e quella del riferimento solo quando quella scala esiste: la distanza
+fra la traccia e la riga verde *è* l'attivazione.
+
+Alla fine compare un **referto**, che è il prodotto vero della procedura — dice
+come sta reagendo il sensore su questa persona. Sta **nel dialog**, sotto i
+blocchi, e in copia nel log; e ogni blocco mostra i propri numeri accanto a sé,
+così quello venuto male si vede subito senza aspettare la fine:
+
+```
+calibrazione fatta: riposo 1200 ±20.0 · massimo 2100 · riferimento 1500 count · accento tipo: picco 1900, salita 90 ms, durata 280 ms
+   ✓ SNR 45: il sensore distingue bene la contrazione dal rumore.
+```
+
+Controlla SNR fra riposo e massimo (sotto 10 gli elettrodi sono mal posizionati o
+storti rispetto alle fibre), **escursione troppo piccola** (sotto il 12% della
+scala dell'ADC è il guadagno da alzare, non gli elettrodi da spostare: il segnale
+cresce e il rumore del convertitore no), **rumore che non si media** come rumore
+bianco, tenuto scambiato per colpo, campioni a fondo scala (guadagno troppo alto:
+i picchi sono tagliati e il tetto è sottostimato), deriva della linea di riposo
+(il gel non ha fatto contatto), accordo fra le tre prove, riferimento sopra il
+massimo, accenti riconosciuti, e cambio di cadenza dopo la calibrazione.
+
+Una calibrazione **rifiutata** non diventa attiva, ma i suoi numeri restano
+leggibili nel dialog e nel log — e da `MyoLink.calBuilt`, per il banco di prova.
+
+Per rileggere a freddo una sessione già registrata c'è
+**`node app/tools/verify-csv.mjs sessione.csv`**: senza argomenti stampa il
+profilo al secondo (da cui si leggono gli intervalli), e con
+`--rest a:b --max a:b,c:d --ha a:b [--rif a:b]` fa girare il modulo vero — stesse
+funzioni, stesse costanti, stesso verdetto dell'app — su quel file. È il modo di
+capire un rifiuto senza rimettere il sensore addosso a nessuno.
+
+La calibrazione si salva in `localStorage` e si riprende al caricamento con
+l'**età** scritta nel log: muore quando si spostano gli elettrodi, cioè a ogni
+sessione, e sopra le 4 ore l'app lo dice invece di lasciarlo scoprire. *Azzera*
+la cancella, salvataggio compreso.
+
+**Il rumore è due numeri, non uno**, e confonderli è l'errore che questa parte ha
+fatto per primo:
+
+- `±X per campione` — σ robusta delle **differenze fra campioni consecutivi**.
+  Sulle differenze e non sui valori perché sull'addome il respiro è segnale, non
+  rumore; e perché una deriva del contatto gonfierebbe una σ sui valori abbastanza
+  da nascondere se stessa. Regola le soglie con cui si riconoscono gli accenti,
+  che lavorano sui campioni grezzi.
+- `±Y sulla lettura a 300 ms` — σ della **mediana mobile** campionata su finestre
+  disgiunte, cioè il rumore di una *lettura*. È questo il denominatore dell'SNR e
+  dei margini, perché una soglia non si mette mai su un campione.
+
+**Mediana e non media**, ed è una differenza misurata su 30 s di riposo vero a
+200 Hz: la σ della lettura passa da 4.73 a **1.92 count**, 2.5 volte, perché il
+disturbo del riposo non è rumore bianco ma bozzi stretti — una decina di ms l'uno
+— che una media spalma e una mediana butta. Con la media, allargare la finestra
+non serviva a niente. Il livello di un tenuto invece passa intatto: la mediana
+toglie i bozzi, non il piano.
+
+Gli accenti, al contrario, si cercano sempre sui **campioni grezzi**: un colpo
+dura 130-240 ms, cioè quanto la finestra, e filtrarlo lo dimezzerebbe. La
+separazione fra livelli e forme non la fa il filtro, la fa l'analisi.
+
+Il **rapporto** fra i due rumori è a sua volta una diagnosi: vicino a 1 vuol dire
+che il disturbo è troppo lento perché la mediana lo tolga — contatto che vaga,
+riferimento incerto — e quello non lo aggiusta né il guadagno né la finestra.
+
+Il campo **EMG** accanto a `offset audio` compensa il ritardo dell'inviluppo del
+sensore, che è filtrato in hardware e in modo causale, quindi *segue* il muscolo.
+Sposta il disegno, non i dati: lo store e il CSV restano timbrati dal firmware.
+
+Il *Simulatore* è, dal punto di vista della calibrazione, un sensore montato
+male, ed è comodo così: farci girare la procedura fa scattare cinque diagnostiche
+su sei, ognuna per la ragione giusta.
+
+## La fatica: il semaforo, e i momenti
+
+Il sensore sta sull'**addome laterale** (obliquo esterno), che è un muscolo del
+*sostegno del fiato*: quanto sta sopra il riposo dice quanto ti sta costando
+quello che stai cantando. È l'unica misura dello strumento, e si vede in due
+posti — un colore mentre canti, una lista dopo.
+
+### La misura, per intero
+
+Mediana mobile a **300 ms** → letta con una seconda mediana su **2 s** → **meno
+il riposo**, in count. Due mediane e una sottrazione: niente percentili, niente
+rapporti fra grandezze.
+
+- la prima mediana toglie il dentellìo per campione, che sull'obliquo esterno è
+  quattro volte più grosso del fenomeno da vedere;
+- la seconda risponde alla domanda giusta, che non è *"quanto stai spingendo
+  adesso"* ma *"quanto ti è costato questo passaggio"*: un attacco di frase non è
+  fatica, due secondi tenuti su sì;
+- la sottrazione rende il numero leggibile: `+24` non è un punteggio, è la
+  distanza dal tuo zero.
+
+**Lo zero non lo chiede a nessuno**: è il 5° percentile del livello sugli ultimi
+due minuti. Funziona perché dentro una canzone il riposo esiste comunque — è la
+pausa fra due frasi, che sull'addome è il rilascio inspiratorio. Sulle quattro
+registrazioni di prova dà **251,0 su tutte e quattro**, cioè esattamente la
+mediana di 34 s di silenzio registrati apposta: **scarto 0,0 count** anche su tre
+minuti di canto quasi continuo. Quindi **calibrare non serve** per questo, e
+nemmeno registrare un blocco di silenzio.
+
+### Le tre zone
+
+| zona | quando | cosa vuol dire |
+|---|---|---|
+| **verde** | fino a **+30** | dentro quello che sostieni bene |
+| **giallo** | **+30 … +55** | è costato più del tuo normale, e *può darsi vada bene così perché il passaggio è difficile* |
+| **rosso** | oltre **+55** | la fascia in cui sta l'unico errore vocale confermato che abbiamo registrato |
+
+I due confini non sono scelti: sono **ancorati a due passaggi etichettati** da chi
+cantava. `+30` è il tetto di ciò che sostiene bene (un passaggio che spinge ma va
+bene sta a +24 di mediana e non supera mai +32); `+55` è la soglia sotto cui non
+scende la strofa in cui è mancato il fiato (mediana +68). Fra i due c'è il
+giallo, che dice l'unica cosa onesta su un passaggio che **nemmeno chi l'ha
+cantato sa giudicare**.
+
+Sono tarati su **quel** montaggio: sposta gli elettrodi e non valgono più. In σ
+del riposo (0,89 count) stanno a 34σ e 62σ; in multipli del passaggio tenuto bene
+(+24), a 1,25× e 2,3×. Quale delle due unità trasferisca si decide misurando, con
+una seconda sessione — finché non c'è, restano in count e si dice.
+
+**Non misura l'altezza della nota**, che era la prima obiezione ragionevole: sullo
+stesso Sol#4, stessa canzone, minuti di distanza, la presa buona sta a **+24** e
+quella con l'errore a **+68**. La nota spiega il 16–24% della varianza del
+livello; il resto è come viene tenuta.
+
+### Dal vivo: il semaforo
+
+Nella barra del pannello *sensore* c'è una pastiglia grande — `verde +3`,
+`giallo +41`, `rosso +68` — abbastanza da prendersi con la coda dell'occhio
+mentre canti. Il colore **non è mai solo**: dentro c'è sempre la parola e il
+numero, perché un semaforo verde/giallo/rosso è la combinazione peggiore per chi
+non distingue i rossi dai verdi.
+
+Sul grafico la stessa cosa, continua: due fasce orizzontali appena accennate a
+`+30` e `+55`, e **la linea della fatica colorata per zona** sopra la nuvola dei
+campioni grezzi e la mediana a 300 ms. La distanza fra la linea e il riposo *è* la
+fatica, senza convertire a mente.
+
+**Due secondi di ritardo, e si dicono.** Il numero a `t` descrive `[t-2s, t]`:
+dal vivo il colore arriva circa un secondo dopo il centro di ciò che descrive, e
+la linea sul grafico si ferma un secondo prima del cursore (disegnata al centro
+della sua finestra, come i momenti). Non è aggiustabile senza cambiare la misura,
+e una misura più corta seguirebbe ogni attacco di frase invece della fatica di un
+passaggio: meglio un semaforo lento e vero che uno pronto e nervoso.
+
+### Dopo: i momenti
+
+Il pulsante *Momenti* analizza la registrazione e ne tira fuori una striscia
+panoramica col **nastro delle zone** — la stessa cosa del semaforo, srotolata su
+tutta la presa — più la lista cliccabile.
+
+**Non ci sono manopole.** Un momento è un tratto che **esce dal verde** e ci resta
+almeno un secondo: una soglia sola, che è anche il confine del verde. Quindi la
+lista **può essere vuota**, e su una presa pulita è il risultato giusto.
+
+**Il numero si mostra**, accanto a ogni momento, insieme alla zona e alla durata:
+
+> `0:46  +82  rosso · 6.5 s  Sol#4`
+
+I **falsi positivi restano voluti**: chi ascolta la voce filtra meglio di
+qualunque soglia — un punto di troppo costa dieci secondi, uno mancato non si
+recupera. Per questo la soglia sta al confine del verde e non più in alto.
+
+**Cosa serve premere, e cosa no.** *Registra* è **facoltativo**: serve solo se
+vuoi il file. Quello che *Momenti* analizza è, in ordine:
+
+1. la **registrazione**, se ne hai fatta una (e allora i tempi dei punti sono già
+   quelli del video);
+2. altrimenti quello che c'è **dopo la calibrazione** — perché i cinque `"SH!"`
+   massimali stanno 13-17 volte sopra un tenuto, e con quelli dentro la lista si
+   riempirebbe di calibrazione invece che di canto;
+3. altrimenti tutto quello che c'è in memoria.
+
+Quale dei tre sia c'è scritto nella barra del pannello e nel log: un intervallo
+sbagliato non dà un errore, dà punti plausibili nel posto sbagliato.
+
+**Il referto nel log** dice anche il **tempo in ciascuna zona**, che è più
+eloquente di qualunque elenco. Sulle registrazioni di prova: la presa buona 0 s di
+rosso, *Call Me a Dog* 2,1 s (1,1%), la presa con l'errore 5,4 s (7,7%) — sette
+volte tanto, in un file lungo un terzo.
+
+**Riascoltare: `▶ ascolta`, o la barra spaziatrice.** Finché il microfono è
+aperto, l'audio finisce in un anello di PCM (24 kHz, otto minuti, 23 MB di RAM):
+clicchi un momento e lo risenti, **senza aver registrato niente**. E mentre suona
+il cursore si muove da sé, quindi EMG, pitch e spettrogramma scorrono con
+l'audio. Durante il riascolto la cattura si ferma — il microfono sentirebbe le
+casse e lo spettrogramma registrerebbe il riascolto come se fosse adesso — quindi
+il nastro ha un buco nel presente, che è il momento in cui stai guardando il
+passato. Con le casse invece delle cuffie ti risentirai in sottofondo: è fisica,
+non un difetto.
+
+**Ferma non scarica niente.** Il file resta in memoria, insieme ai CSV
+dell'intervallo registrato, e li porta via *Salva video + CSV (2:24 · 18.6 MB)*,
+che dice **quanto dura** e quanto pesa — la durata per riconoscere quale delle tre
+prove è, il peso per sapere cosa costa portarsela via. Fra "ho finito di cantare"
+e "questo me lo tengo" in mezzo c'è il riascolto. Restano lì fino alla
+registrazione successiva o al ricaricamento della pagina, e il log lo dice.
+
+Mentre si registra, accanto a *Registra* c'è `● 0:37 · 4.2 MB`. Il cronometro lo
+muove il **ciclo di disegno**, non l'arrivo dei chunk: appeso a `ondataavailable`
+avanzava a scatti di due o tre secondi — l'encoder consegna quando gli conviene,
+non a cadenza fissa — e un cronometro che salta si legge come un'app piantata. Il
+peso invece **arriva quando arriva**, ed è per questo che compare solo quando c'è
+(in kB finché è piccolo): `0.0 MB` fermo accanto a un cronometro che corre è il
+numero che fa dubitare che stia registrando.
+
+**Come si legge la striscia.** È tutta la registrazione, larga quanto la
+finestra: l'inviluppo del segnale con la riga tratteggiata del riposo, sotto il
+**nastro delle zone** (verde scuro di fondo, e le tacche gialle e rosse che
+saltano fuori), il rettangolo di quello che i tre pannelli stanno mostrando, e i
+minuti sotto. Cliccala — su un punto o su un posto qualunque — e i tre pannelli si
+spostano lì, col momento **al centro**; `n` e `p` scorrono i punti, *dal vivo*
+torna a seguire l'adesso.
+
+**Tieni / scarta, e perché è la parte importante.** Chi canta sa dire «qui ho
+sbagliato» quando l'errore è grosso, e *non* sa dire se un passaggio un po'
+caricato fosse giusto: le etichette che esistono sono due, e queste sono l'unico
+modo in cui se ne formeranno altre. Finiscono in `marks.json` col **numero e la
+zona** di ogni punto, e con le costanti usate per produrli — perché i confini si
+sposteranno, e un file esportato deve restare leggibile fra un anno.
+
+Accanto al `.json` esce un **`.vtt`**: VLC lo mostra come sottotitoli, QuickTime e
+YouTube come capitoli. Rende i punti navigabili in qualunque player senza
+rimuxare niente.
+
+**Rianalizzare a freddo.** Sia *Salva video + CSV* (la sola registrazione) sia
+*CSV live* (tutta la memoria) scrivono due file — i campioni EMG e le stime di
+pitch, che hanno due basi dei tempi diverse e fonderle vorrebbe dire interpolarne
+una. Con quelli:
+
+```bash
+node app/tools/marks-csv.mjs canzone.csv --pitch canzone-pitch.csv --vtt canzone.vtt
+```
+
+gira il **modulo vero** — stesse funzioni, stesse costanti, stessi punti che
+vedrebbe l'utente — e scrive i capitoli da mettere accanto all'mp4. È il modo di
+cambiare una costante e riascoltare l'effetto, invece di indovinare.
 
 ## Le statistiche dell'app
 
@@ -480,6 +801,14 @@ Servono a rispondere a "il BLE regge?" con numeri invece che a occhio:
   `clip` sale, il microfono sta saturando e lo spettro non è più affidabile.
 - **colonne/s** — cadenza effettiva della FFT, da confrontare con `hop` scritto
   accanto ai controlli dello spettrogramma.
+- **attivazione / sopra il riposo** — la mediana degli ultimi 300 ms, nella
+  migliore unità disponibile (`×rif`, altrimenti frazione del tetto balistico,
+  altrimenti count) e in σ del riposo. Restano `—` finché non c'è una
+  calibrazione: un count senza unità non è un'attivazione.
+- **fatica (2 s)** — il numero esatto che sta dietro il semaforo. È l'unica riga
+  di questo gruppo che **non** ha bisogno della calibrazione: lo zero se lo prende
+  dalla sessione.
+- **calibrazione** — il peggiore dei controlli del referto, con l'SNR accanto.
 - **nota / clarity** — l'ultima stima di pitch e quanto vale. `nota` resta `—`
   finché la clarity non supera la soglia del pannello.
 
@@ -492,7 +821,8 @@ mandare il timestamp.
 
 Fatto: firmware unico seriale + BLE con scelta automatica del trasporto,
 protocollo, grafico live, pitch, spettrogramma, strumentazione, registrazione
-video + audio ed export CSV.
+video + audio, export CSV, calibrazione del sensore sulla persona e ricerca dei
+momenti salienti nella registrazione.
 
 Verificato:
 
@@ -592,7 +922,8 @@ Verificato:
     silenzio che riparte a **2,41 s**. Prima l'audio si fermava a 2,46 s su 5 s,
     e veniva ribasato a zero — cioè il file usciva sfasato;
   - CSV: intestazione `t_s,valore`, una riga per campione, tempi strettamente
-    crescenti; nomi `myolink-AAAAMMGG-hhmmss.ext` per entrambi i formati;
+    crescenti; nomi `myolink-AAAAMMGG-hhmmss.ext` per entrambi i formati, e il
+    timbro condiviso fra i file di una stessa registrazione;
   - con il sesto pulsante nell'header, a **390×844** l'header resta **102 px** e
     i pulsanti su una riga sola come alla fase 3, e le spunte del video sono
     raggiungibili nel cassetto ⚙;
@@ -606,6 +937,53 @@ Verificato:
   PSNR contro una sorgente lossless separano il contributo del bitrate (+1.03 dB)
   da quello del profilo (+0.08 dB di luma, +1.17 di crominanza).
 
+- La **fatica e i momenti**, sulle quattro registrazioni cantate vere di
+  `docs/samples/` (silenzio, *Man in the Box* con e senza un errore confermato,
+  *Call Me a Dog*), su brani sintetici e sull'app vera in Chrome headless:
+  - `node app/tools/analisi-samples.mjs` rifà con un comando **tutti** i numeri su
+    cui si reggono le tre zone; `marks-csv.mjs` fa girare il **modulo vero**
+    dell'app sugli stessi CSV e ritrova gli stessi tratti;
+  - **la strofa in cui è mancato il fiato esce, e da sola**: `0:46–0:53 · +82 ·
+    rosso`, che è esattamente il tratto indicato da chi cantava. La presa buona
+    dello stesso brano dà **0 s di rosso**, *Call Me a Dog* ne dà 2,1 s (1,1%) e
+    la presa con l'errore 5,4 s (7,7%) — **sette volte tanto, in un file lungo un
+    terzo**;
+  - **lo zero automatico è lo zero vero**: il 5° percentile del livello dà
+    **251,0 su tutte e quattro** le registrazioni, cioè la mediana dei 34 s di
+    silenzio registrati apposta, con **scarto 0,0 count** anche su tre minuti di
+    canto quasi continuo. È quello che permette al semaforo di funzionare senza
+    calibrazione e senza un blocco di silenzio;
+  - **non è un misuratore di altezza**: sullo stesso Sol#4, stessa canzone,
+    minuti di distanza, la presa buona sta a **+24** (25°–95° percentile: +24…+29)
+    e quella con l'errore a **+68**. La nota spiega il 16–24% della varianza;
+  - il riposo trovato nelle pause fra le frasi cade entro **6 count** da quello
+    vero su brano sintetico, e una deriva di 60 count iniettata viene **misurata e
+    detta**, non corretta;
+  - `tools/bench-momenti.mjs` guida l'app vera — iniezione negli store, semaforo,
+    *Momenti*, revisione, curatela, striscia, nastro delle zone, riascolto,
+    registrazione tenuta in memoria — con **41 controlli** verdi e zero eccezioni:
+    il semaforo dice la stessa cosa della misura e trova lo zero da solo entro
+    1 count, i tre passaggi tirati iniettati danno **tre** momenti e non venti, il
+    numero è in lista accanto a ognuno, la curatela sopravvive al ricalcolo, e con
+    una registrazione in memoria si analizza **solo quella**;
+  - **il nastro dell'audio**: il microfono finto apre, il nastro si riempie a 24
+    kHz, `▶ ascolta` riparte dal cursore e il cursore **avanza di 0,90 s in 0,90 s**
+    di orologio (cioè i tre pannelli scorrono con l'audio); durante il riascolto la
+    cattura **non scrive** negli store, verificato contando le stime di pitch;
+  - **Stop tiene il file** invece di scaricarlo, il pulsante *Salva video + CSV*
+    compare con durata e peso scritti sopra, e il log spiega la differenza fra
+    analizzare e salvare;
+  - **i CSV sono quelli della registrazione**: con 180 s di brano in memoria e 3 s
+    registrati, i due file escono col nome del video, con ~600 righe invece di
+    36.000, e **nessuna riga fuori dall'intervallo** — leggendo il blob davvero,
+    perché è quello che finisce sul disco;
+  - **190 test unitari** verdi in tutto, di cui 33 + 19 + 12 sui tre moduli di
+    questa parte: riposo e deriva, i confini delle zone, la lettura dal vivo che
+    coincide con la serie, lo zero che il canto continuo non sposta, l'isteresi
+    che non spezza un tratto in tre, il tratto attribuito al **centro** della sua
+    finestra, la lista **vuota** su una presa pulita, `.vtt` e `.json` con dentro
+    le costanti usate per produrli.
+
 Sul WebM che l'app produceva prima: guardando i byte, mancavano `Duration`,
 `SeekHead` e `Cues`, e dopo un `ffmpeg -c copy` ci sono tutti e tre. È il
 comportamento del muxer *live* del browser, non un difetto dell'app — ma è anche
@@ -618,7 +996,10 @@ l'ottava a YIN. Vanno scollegati (`A.src.disconnect()`) prima di iniettare il
 tono, altrimenti si misura il rumore del banco. `--use-file-for-fake-audio-capture`
 non inietta nulla in headless: la traccia resta a −120 dBFS.
 
-Non ancora provato su hardware, e il pitch non ancora provato su voce vera. La UI
+Non ancora provato su hardware, e il pitch non ancora provato su voce vera. I
+**momenti salienti** sono misurati su brani sintetici, dove trovano tutto quello
+che ci è stato messo dentro: è una condizione necessaria e non sufficiente, e la
+prova che manca è una canzone vera (con `tools/marks-csv.mjs` e il `.vtt` in VLC). La UI
 mobile è misurata su un telefono **emulato**: le metriche e gli eventi di tocco
 sono quelli veri, la barra del browser che si ritrae e la latenza del dito no.
 Delle registrazioni si è verificato il file, non la resa a occhio e orecchio: il
@@ -639,7 +1020,7 @@ CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/
 
 ## Prossimi passi
 
-Il piano di lavoro sta in **[docs/PIANO.md](docs/PIANO.md)**, in quattro fasi
+Il piano di lavoro sta in **[docs/PIANO.md](docs/PIANO.md)**, in fasi
 indipendenti e ripartibili a freddo:
 
 1. **Diagnostica dei permessi** — fatta, vedi sopra.
@@ -654,7 +1035,25 @@ indipendenti e ripartibili a freddo:
    a mano, più l'export CSV dei campioni. Solo esportazione: niente riapertura di
    sessione.
 
-Fuori piano per ora: timeline scrubbabile e render offline in WebCodecs;
+5. **Momenti salienti** — trovare nella performance i punti in cui il sostegno
+   costa troppo, e poterli riguardare. La **5a** (calibrazione e attivazione
+   normalizzata) è fatta. La **5b** — tre rilevatori, salienza relativa alla
+   registrazione, due manopole — è stata **cancellata**: le prime registrazioni
+   cantate vere hanno smentito l'ipotesi su cui era costruita, e l'indice di
+   oscillazione su cui contava è risultato *invertito*. Il racconto sta in
+   `docs/PIANO.md`, il seguito in `docs/PIANO-fase6.md`.
+
+   La **6** è fatta, vedi sopra: una misura sola, tre zone ancorate a due
+   passaggi etichettati, il semaforo dal vivo, i momenti col numero accanto.
+   Resta la **5c**: il replay in app della sessione appena registrata, cioè
+   agganciare il `<video>` al cursore di revisione che c'è già nell'asse dei
+   tempi. E resta una domanda che si chiude solo misurando: **in che unità** i
+   due confini trasferiscono a un altro montaggio (σ del riposo o multipli del
+   canto normale), che ha bisogno di una seconda sessione con gli elettrodi
+   rimessi da capo.
+
+Fuori piano per ora: riapertura di sessioni salvate su disco (serve un formato)
+e render offline in WebCodecs;
 **seriale su Android** via WebUSB (Web Serial su Android non esiste, e il parser
 è già indipendente dal trasporto: basterebbe una `connectUsb()`); **port nativo**
 in Flutter, solo se servono iOS o installer distribuibili.

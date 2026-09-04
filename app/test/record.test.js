@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { composeLayout } from "../src/record/layout.js";
-import { emgCsv, extFor, MIME_CANDIDATES, stampName, supportedMimes, videoBitrate } from "../src/record/export.js";
-import { Store } from "../src/core/store.js";
+import {
+  countInRange, emgCsv, extFor, inRange, MIME_CANDIDATES, pitchCsv, stamp, stampName,
+  supportedMimes, videoBitrate,
+} from "../src/record/export.js";
+import { PitchStore, Store } from "../src/core/store.js";
 
 describe("composeLayout", () => {
   it("impila nell'ordine dato, senza toccare la larghezza", () => {
@@ -150,6 +153,98 @@ describe("stampName", () => {
     const a = stampName("x", "csv", new Date(2026, 0, 9, 23, 59, 59));
     const b = stampName("x", "csv", new Date(2026, 0, 10, 0, 0, 0));
     expect([b, a].sort()).toEqual([a, b]);
+  });
+
+  it("il timbro è riusabile da solo: i file di UNA registrazione lo condividono", () => {
+    // Video e CSV con due timbri diversi — anche solo un secondo — non si
+    // riconoscono più come lo stesso pezzo di prova nella cartella dei download.
+    const d = new Date(2026, 7, 13, 9, 4, 5);
+    const base = "myolink-" + stamp(d);
+    expect([base + ".mp4", base + ".csv", base + ".pitch.csv"]).toEqual([
+      "myolink-20260813-090405.mp4",
+      "myolink-20260813-090405.csv",
+      "myolink-20260813-090405.pitch.csv",
+    ]);
+    expect(stampName("myolink", "mp4", d)).toBe(base + ".mp4");
+  });
+});
+
+// L'intervallo è ciò che separa "i dati della registrazione" da "i dati della
+// sessione": è la domanda a cui l'app rispondeva male, e questi sono i suoi bordi.
+describe("inRange", () => {
+  const ring = () => {
+    const s = new Store(16);
+    for (let k = 0; k <= 10; k++) s.push(k, k * 100);
+    return s;
+  };
+
+  it("senza intervallo esce tutto: è l'export di tutta la memoria", () => {
+    expect(inRange(ring(), null)).toEqual({ from: 0, to: 11 });
+  });
+
+  it("estremi COMPRESI: un campione timbrato esattamente allo stop è dentro", () => {
+    // Mezzo campione fuori per parte sarebbe invisibile su un grafico e visibile
+    // in un CSV, cioè il posto peggiore in cui scoprirlo.
+    expect(inRange(ring(), { t0: 3, t1: 6 })).toEqual({ from: 3, to: 7 });
+    expect(countInRange(ring(), { t0: 3, t1: 6 })).toBe(4);
+  });
+
+  it("tempi ripetuti al bordo: ci sono tutti, non solo il primo", () => {
+    const s = new Store(16);
+    for (const t of [1, 2, 2, 2, 3]) s.push(t, 0);
+    expect(inRange(s, { t0: 2, t1: 2 })).toEqual({ from: 1, to: 4 });
+  });
+
+  it("intervallo che non tocca nessun campione: fetta vuota, non l'anello intero", () => {
+    expect(countInRange(ring(), { t0: 20, t1: 30 })).toBe(0);
+    expect(countInRange(ring(), { t0: -5, t1: -1 })).toBe(0);
+    // t1 prima di t0 (clock che si è riassestato all'indietro): niente, non tutto.
+    expect(countInRange(ring(), { t0: 8, t1: 2 })).toBe(0);
+  });
+
+  it("intervallo più largo dei dati: quello che c'è, senza inventare righe", () => {
+    expect(countInRange(ring(), { t0: -100, t1: 100 })).toBe(11);
+  });
+
+  it("guarda la finestra viva, non gli slot buttati dal giro del buffer", () => {
+    const s = new Store(3);
+    [1, 2, 3, 4].forEach((t) => s.push(t, t * 10));
+    expect(inRange(s, { t0: 0, t1: 10 })).toEqual({ from: 0, to: 3 });
+  });
+});
+
+describe("emgCsv e pitchCsv sull'intervallo registrato", () => {
+  it("esce la sola fetta del video, con la stessa intestazione", () => {
+    const s = new Store(16);
+    for (let k = 0; k <= 10; k++) s.push(k, k * 100);
+    const rows = emgCsv(s, { t0: 3, t1: 5 }).trim().split("\n");
+    expect(rows[0]).toBe("t_s,valore");
+    expect(rows.slice(1)).toEqual(["3.000000,300", "4.000000,400", "5.000000,500"]);
+  });
+
+  it("intervallo senza campioni: solo l'intestazione — e chi salva la conta prima", () => {
+    // Il file non va scritto affatto in quel caso (vedi snapshotData): un CSV di
+    // sola intestazione sembra un dato perso.
+    const s = new Store(8);
+    s.push(1, 10);
+    expect(emgCsv(s, { t0: 50, t1: 60 })).toBe("t_s,valore\n");
+    expect(countInRange(s, { t0: 50, t1: 60 })).toBe(0);
+  });
+
+  it("il pitch si taglia sullo stesso intervallo, con clarity accanto", () => {
+    const p = new PitchStore(16);
+    p.push(1, 60, 0.9); p.push(2, 62, 0.8); p.push(3, 64, 0.7);
+    const rows = pitchCsv(p, { t0: 2, t1: 3 }).trim().split("\n");
+    expect(rows[0]).toBe("t_s,midi,clarity");
+    expect(rows.length).toBe(3);
+    expect(rows[1]).toBe("2.000000,62.0000,0.8000");
+  });
+
+  it("senza intervallo i due CSV restano quelli di prima: tutta la memoria", () => {
+    const s = new Store(8);
+    s.push(1, 10); s.push(2, 20);
+    expect(emgCsv(s, null)).toBe(emgCsv(s));
+    expect(emgCsv(s).trim().split("\n").length).toBe(3);
   });
 });
 

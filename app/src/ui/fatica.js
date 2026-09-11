@@ -20,8 +20,8 @@
 // **Lo zero non lo chiede a nessuno**: è il 5° percentile del livello sugli ultimi
 // due minuti, che sui samples del 4 settembre coincide al decimo di count col
 // silenzio registrato apposta (vedi `zeroVivo`). Serve però un po' di storia — i
-// primi venti secondi il semaforo resta spento e lo scrive, perché con dieci
-// secondi di canto il "riposo" sarebbe la frase più piana.
+// primi `ZERO_MIN` secondi il semaforo resta spento e lo scrive, perché con
+// qualche secondo di solo canto il "riposo" sarebbe la frase più piana.
 
 import { store } from "../core/state.js";
 import { ROSSO, VERDE, ZERO_MIN, Z, faticaOra, zeroVivo, zona } from "../core/fatica.js";

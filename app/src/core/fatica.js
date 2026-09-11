@@ -146,7 +146,19 @@ export function faticaOra(ring, base) {
 // un'altra cosa. Lo zero di questa sessione lo dice questa sessione.
 export const ZERO_Q = 0.05;
 export const ZERO_WIN = 120;      // su quanta storia si guarda
-export const ZERO_MIN = 20;       // sotto questo non si risponde: sarebbe il canto più piano
+// **Cinque secondi, non venti.** La prima stesura ne chiedeva venti per una
+// ragione vera — con dieci secondi di canto il "riposo" sarebbe la frase più
+// piana — ma li chiedeva a chiunque, anche a chi il sensore lo accende e sta
+// fermo, che è quello che fa chiunque apra l'app. Venti secondi di schermo che
+// dice «sto misurando» prima di rispondere sono la prima cosa che si vede, e
+// non è vero che servano: cinque secondi di quiete bastano al 5° percentile,
+// perché su cinque secondi fermi la distribuzione è tutta riposo.
+//
+// Il caso brutto resta e si paga così com'è: chi parte cantando ottiene uno zero
+// troppo alto, cioè una fatica sottostimata, per i primi secondi. Si corregge da
+// sé — la finestra è mobile su due minuti e lo zero si ricalcola ogni secondo —
+// e comunque è meglio di un numero che non arriva.
+export const ZERO_MIN = 5;        // sotto questo non si risponde: sarebbe il canto più piano
 
 export function zeroVivo(ring, { win = ZERO_WIN, min = ZERO_MIN } = {}) {
   if (!ring?.n) return NaN;
@@ -202,4 +214,29 @@ export function tempiInZona(ts, f) {
     out[zona(f[i]) || "muto"] += dt;
   }
   return out;
+}
+
+// ---- media e mediana di una serie di fatica ----
+//
+// Le due si tengono ENTRAMBE, e non è indecisione. Sulla presa del 4 settembre
+// la media è +12 e la mediana +4: la differenza sono tutti e soli quei 5,4
+// secondi di rosso. Mostrarne una sola dal vivo vorrebbe dire scegliere per chi
+// guarda quale dei due significati conti — "quanto ti è costata in tutto" oppure
+// "com'è andata di solito" — e sono due domande diverse, tutt'e due legittime.
+// Stanno insieme fra le misure avanzate, dove un riassunto ha senso.
+//
+// I `NaN` dei primi due secondi si saltano: non sono zeri, sono assenza di misura.
+export function sintesi(f) {
+  const ok = [];
+  for (const v of f) if (isFinite(v)) ok.push(v);
+  if (!ok.length) return { n: 0, media: NaN, mediana: NaN };
+  let s = 0;
+  for (const v of ok) s += v;
+  ok.sort((a, b) => a - b);
+  const h = ok.length >> 1;
+  return {
+    n: ok.length,
+    media: s / ok.length,
+    mediana: ok.length % 2 ? ok[h] : (ok[h - 1] + ok[h]) / 2,
+  };
 }

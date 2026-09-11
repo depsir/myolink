@@ -7,6 +7,8 @@
 import { pitch } from "../core/state.js";
 import { BLACK, PITCH_HOP, centsStr, hzOf, noteName, parseNote } from "../audio/pitch.js";
 import { pctx, pitW, pitH, PAD, PPAD } from "./canvas.js";
+import { etichetteTempi, reticoloTempi } from "./tempo.js";
+import { semplice } from "../ui/modo.js";
 import { $ } from "../ui/dom.js";
 
 const PITCH_COL = "#7ee787";                       // distinto dal blu EMG e dal magma
@@ -24,11 +26,39 @@ export const pThr = () => Math.max(0, Math.min(1, +$("pthr").value || 0));
 // risoluzione che serve all'asse, e costa una passata sola senza allocazioni.
 const P_TRIM = 0.02;
 const pHist = new Int32Array(128);
-let pRange = null;
+let pRange = null, pSnap = null;
 
 // Passando ad automatico si riparte dai dati in vista, senza inseguire da dove
 // era rimasto il range manuale.
-export function resetPitchRange() { pRange = null; }
+export function resetPitchRange() { pRange = null; pSnap = null; }
+
+// ---- l'asse del modo semplice: ottave, e sta fermo ----
+//
+// L'inseguimento continuo è giusto in avanzato e illeggibile nel semplice: «il
+// pitch, che si autoadatta, non si capisce molto». Il difetto non è la velocità
+// — il filtro è già lento — è che l'asse non ha MAI due volte la stessa scala:
+// i DO scivolano, i tasti neri si spostano sotto la linea, e una nota tenuta
+// ferma sembra salire perché è il fondo a scendere.
+//
+// Qui invece l'asse si aggancia alle OTTAVE e si muove a scatti: gli estremi
+// sono sempre dei DO, il campo è un numero intero di ottave (minimo due), e
+// cambia solo quando la voce sta davvero per uscire — un semitono di margine
+// dentro il bordo, che è l'isteresi senza cui l'asse sbatterebbe avanti e
+// indietro su ogni nota di confine. Il risultato è una tastiera che resta ferma
+// per tutta una canzone, e quando si sposta lo fa di un'ottava intera: si vede
+// che è successo, invece di scoprirlo dopo.
+const OTT = 12;
+// `vuoto` = in vista non c'è nessuna stima buona, cioè una pausa. Lì l'asse NON
+// si tocca: il campo proposto sarebbe quello di ripiego (due ottave da C3) e la
+// tastiera salterebbe a ogni respiro, che è il contrario di quello che serve.
+function ottave(tLo, tHi, vuoto) {
+  if (pSnap && (vuoto || (tLo >= pSnap.lo + 1 && tHi <= pSnap.hi - 1))) return pSnap;
+  let lo = Math.floor(tLo / OTT) * OTT;
+  let hi = Math.ceil(tHi / OTT) * OTT;
+  while (hi - lo < 2 * OTT) { hi += OTT; if (hi - lo < 2 * OTT) lo -= OTT; }
+  pSnap = { lo, hi };
+  return pSnap;
+}
 
 function pitchRange(ax) {
   if (!$("pauto").checked) {
@@ -55,6 +85,7 @@ function pitchRange(ax) {
     const span = Math.max(12, hi - lo + 4);        // mai meno di un'ottava
     tLo = Math.round((lo + hi) / 2 - span / 2); tHi = tLo + span;
   }
+  if (semplice()) return ottave(tLo, tHi, !tot);
   if (!pRange) pRange = { lo: tLo, hi: tHi };
   else { pRange.lo += (tLo - pRange.lo) * 0.06; pRange.hi += (tHi - pRange.hi) * 0.06; }
   return pRange;
@@ -89,13 +120,8 @@ export function drawPitch(ax) {
     const y = Math.round(Y(m - 0.5)) + .5;
     pctx.beginPath(); pctx.moveTo(PAD.l, y); pctx.lineTo(PAD.l + gw, y); pctx.stroke();
   }
-  // reticolo dei tempi, con lo stesso passo del grafico EMG
-  const step = ax.W <= 2 ? 0.25 : ax.W <= 6 ? 1 : ax.W <= 20 ? 2 : 5;
-  pctx.strokeStyle = "#1c222c";
-  for (let s = Math.ceil(ax.tLeft / step) * step; s <= ax.tNow; s += step) {
-    const x = Math.round(X(s)) + .5;
-    pctx.beginPath(); pctx.moveTo(x, PPAD.t); pctx.lineTo(x, PPAD.t + gh); pctx.stroke();
-  }
+  // reticolo dei tempi: la stessa funzione del grafico EMG, quindi lo stesso passo
+  reticoloTempi(pctx, ax, X, PPAD.t, gh);
 
   // La linea si interrompe quando la stima non è credibile: un tratto continuo
   // sopra il silenzio o sopra una consonante sarebbe un'invenzione.
@@ -121,16 +147,35 @@ export function drawPitch(ax) {
   }
   pctx.restore();
 
-  // Striscia di clarity: dice quando fidarsi della linea qui sopra. Con una base
-  // musicale in cassa scende subito, ed è il segnale che il valore non vale.
-  const sy = PPAD.t + gh + 5;
-  for (let k = from; k < pitch.n; k++) {
-    const i = pitch.idx(k), x = X(pitch.t[i]);
-    if (x < PAD.l || x > PAD.l + gw) continue;
-    const c = pitch.c[i];
-    pctx.fillStyle = c >= thr ? "#3fb950" : c >= thr * 0.75 ? "#d29922" : "#6e2c2c";
-    pctx.fillRect(x, sy, 2, 3);
+  // ---- la striscia di clarity, e perché nel semplice non c'è ----
+  //
+  // Dice quando fidarsi della linea qui sopra: verde sopra la soglia, gialla
+  // appena sotto, rosso scuro quando la stima non è credibile — silenzio,
+  // consonanti, una base in cassa che porta una seconda sorgente. È una misura
+  // sulla MISURA, non sulla voce.
+  //
+  // Nel semplice non si disegna. Non perché sia inutile, ma perché lì non è
+  // spiegata da niente e viene letta come un dato («cosa sono quei puntini rossi
+  // e verdi in basso? non capisco»): una fila di puntini colorati sotto un
+  // grafico sembra un secondo grafico. E soprattutto **quello che dice si vede
+  // già**: sotto soglia la linea si interrompe, e un buco è più leggibile di un
+  // puntino rosso. In avanzato resta, perché lì la soglia è un comando in barra e
+  // la striscia è come la si tara.
+  if (!semplice()) {
+    const sy = PPAD.t + gh + 5;
+    for (let k = from; k < pitch.n; k++) {
+      const i = pitch.idx(k), x = X(pitch.t[i]);
+      if (x < PAD.l || x > PAD.l + gw) continue;
+      const c = pitch.c[i];
+      pctx.fillStyle = c >= thr ? "#3fb950" : c >= thr * 0.75 ? "#d29922" : "#6e2c2c";
+      pctx.fillRect(x, sy, 2, 3);
+    }
   }
+
+  // L'asse dei tempi, uguale a quello del sensore: i due pannelli hanno la stessa
+  // finestra e gli stessi margini, e finché uno solo dei due la scriveva
+  // bisognava guardare l'altro per sapere quanto si stava vedendo.
+  etichetteTempi(pctx, ax, X, PAD.l, PAD.l + gw, PPAD.t + gh + 11);
 
   // Nomi delle note nei margini, fuori dal clip. Su ENTRAMBI i lati: dal vivo si
   // guarda il bordo destro, perché è lì che esce la nota che si sta cantando.
@@ -140,11 +185,20 @@ export function drawPitch(ax) {
     const isC = ((m % 12) + 12) % 12 === 0;
     if (!isC && semi < 12) continue;
     const y = Y(m);
-    if (y < PPAD.t + 4 || y > PPAD.t + gh - 4) continue;
+    // Il nome rientra invece di sparire, ma **solo nel semplice**: lì l'asse è
+    // agganciato alle ottave e i DO cadono ESATTAMENTE sui due bordi, quindi
+    // saltandoli resterebbe etichettato solo quello di mezzo — una tastiera con
+    // un nome solo. In avanzato sono etichettati tutti i semitoni, e un nome
+    // tirato dentro finirebbe addosso al suo vicino: lì il bordo taglia, come
+    // ha sempre fatto.
+    const dentro = y >= PPAD.t + 4 && y <= PPAD.t + gh - 4;
+    const sposta = !dentro && semplice() && y > PPAD.t - 6 && y < PPAD.t + gh + 6;
+    if (!dentro && !sposta) continue;
+    const yl = dentro ? y : Math.max(PPAD.t + 5, Math.min(PPAD.t + gh - 5, y));
     const nm = noteName(m);
     pctx.fillStyle = isC ? "#8b949e" : "#5a626c";
-    pctx.textAlign = "right"; pctx.fillText(nm, PAD.l - 6, y);
-    pctx.textAlign = "left"; pctx.fillText(nm, PAD.l + gw + 8, y);
+    pctx.textAlign = "right"; pctx.fillText(nm, PAD.l - 6, yl);
+    pctx.textAlign = "left"; pctx.fillText(nm, PAD.l + gw + 8, yl);
   }
 
   if (lastGood >= 0) {

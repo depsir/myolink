@@ -26,6 +26,10 @@ import { setupStats, updateStats } from "./ui/stats.js";
 import { lastCal, setupCalib } from "./ui/calib.js";
 import { drawStrip, marks, range as marksRange, reviewT, setupMarks } from "./ui/marks.js";
 import { FT, setupFatica, tickFatica } from "./ui/fatica.js";
+import { F } from "./core/fase.js";
+import { MODO, setupModo, tracce } from "./ui/modo.js";
+import { setupRack, tickRack } from "./ui/rack.js";
+import { setupRiquadro, tickRiquadro } from "./ui/riquadro.js";
 import { $, log } from "./ui/dom.js";
 
 // Il cursore avanza col clock dell'host mappato sull'asse del grafico: se i dati
@@ -58,16 +62,29 @@ function draw() {
   // si limita da sé a 5 Hz (lo zero a 1 Hz), quindi chiamarlo a ogni fotogramma
   // non costa niente.
   tickFatica();
+  // Il riquadro e la rastrelliera degli ingressi: entrambi si limitano da sé a
+  // 5 Hz e toccano il DOM solo quando il testo cambia, quindi stanno nel ciclo
+  // come le statistiche invece di avere due timer propri. Uno stato che si
+  // aggiorna da un timer suo è uno stato che, prima o poi, mostra un istante
+  // diverso da quello che i grafici stanno disegnando.
+  tickRack();
+  tickRiquadro();
   // Dopo i tre pannelli: il canvas di composizione copia fotogrammi già finiti.
   if (R.on) drawComposite();
   updateStats();
 }
+
+// Il modo PRIMA di tutto il resto: decide quali pannelli hanno dimensione, e
+// quindi cosa misura il primo `resize()`.
+setupModo();
 
 setupPanels();
 setupStats();
 setupCalib();
 setupMarks();
 setupFatica();
+setupRiquadro();
+setupRack();
 
 $("btnSerial").onclick = connectSerial;
 $("btnBle").onclick = connectBle;
@@ -110,6 +127,14 @@ $("hintBox").open = window.innerWidth > 720;
 // `calBuilt` è l'ultima costruita anche se rifiutata — `CAL` solo quella attiva.
 window.MyoLink = {
   S, T, store, spec, pitch, clock, A, P, R, PAD, TP,
+  // La fase e il modo: dal banco di prova sono ciò che dice quale schermata si
+  // sta guardando, e senza di loro un controllo su "il comando giusto è in
+  // vista" dovrebbe dedurlo dal CSS.
+  F, MODO,
+  // Quali delle tre letture del grafico del sensore sono accese: dal banco di
+  // prova è il modo di controllare che la legenda e il disegno dicano la stessa
+  // cosa, senza andare a leggere il localStorage.
+  get tracce() { return tracce(); },
   get CAL() { return CAL; },
   // Il semaforo della fatica dal vivo: zero, numero e zona. Dal banco di prova è
   // il solo modo di controllare che il colore corrisponda alla misura.

@@ -13,6 +13,7 @@ c'è il perché, cosa si tocca e quando è finita.
 | 5b | Momenti salienti: due manopole, salienza relativa | **fatta** |
 | 5c | Replay della sessione registrata | da fare |
 | 6 | **Un rilevatore solo, tarato sui dati veri** — fatta | vedi [PIANO-fase6.md](PIANO-fase6.md) |
+| 7 | **Due modi e due fasi: la UI per chi canta** | vedi [PIANO-fase7.md](PIANO-fase7.md) |
 
 > **4 settembre 2026 — la fase 5b è superata.** Le prime registrazioni cantate vere
 > (`docs/samples/`) hanno smentito l'ipotesi su cui era costruita, e il rilevamento

@@ -11,7 +11,12 @@
 <!-- Favicon inline: nessuna richiesta di rete, quindi niente 404 in console. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1116'/%3E%3Cpath d='M3 16h5l2-7 3 14 3-11 2 6 2-3h7' fill='none' stroke='%234ea1ff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
-<body>
+<!-- Due attributi, e sono l'impianto di tutta la fase 7. `data-modo` è quanto
+     mostrare (una preferenza, ricordata); `data-fase` è che cosa stai facendo
+     (vivo / registrando / presa). Stanno nel markup e non solo in JavaScript
+     così la prima pittura è già quella giusta: senza, il modo semplice si
+     aprirebbe per un attimo con tutti i 29 pulsanti dell'avanzato. -->
+<body data-modo="semplice" data-fase="vivo">
 
 <!-- L'header è diviso in tre righe LOGICHE: su desktop sono `display: contents`,
      cioè spariscono e i pulsanti tornano a essere una riga sola come prima; su
@@ -20,13 +25,16 @@
   <div class="hrow top">
     <h1>MyoLink</h1>
     <button id="btnCfg" class="icon" aria-expanded="false" aria-label="impostazioni"></button>
+    <!-- L'unico comando che esiste in tutti e due i modi, e l'unica via fra loro.
+         Dice DOVE PORTA, non dove sei: un interruttore etichettato col proprio
+         stato si legge al contrario metà delle volte. -->
+    <button id="btnModo" class="modo" aria-pressed="false">Avanzato</button>
     <span id="status"><span class="dot" id="dot"></span>disconnesso</span>
   </div>
 
   <div class="hrow conn">
     <button id="btnSerial" class="primary"><span class="lg">Collega seriale</span><span class="sm">Seriale</span></button>
     <button id="btnBle" class="primary"><span class="lg">Collega BLE</span><span class="sm">BLE</span></button>
-    <button id="btnDemo"><span class="lg">Simulatore</span><span class="sm">Demo</span></button>
     <!-- "Disconnetti" e non "Stop": chiude il link col device, non "mette in pausa"
          la lettura. Chiamarlo Stop accanto a Registra faceva pensare a due stop
          della stessa cosa, e non lo sono. -->
@@ -39,17 +47,24 @@
     <button id="btnSave" class="primary" hidden title="scarica il video e i CSV dell'intervallo registrato"><span class="lg">Salva video + CSV</span><span class="sm">Salva</span></button>
   </div>
 
+  <!-- Il cassetto in quattro famiglie, e l'ordine è quello di quanto spesso si
+       tocca ognuna: la finestra si cambia mentre si guarda, i tre ritardi e la
+       cadenza si regolano una volta per montaggio, le caselle del video si
+       decidono prima di registrare, gli strumenti si aprono a parte. Erano
+       undici controlli in fila divisi da separatori muti: i separatori c'erano
+       già, mancavano i nomi delle cose che separavano. -->
   <div class="hrow cfg">
     <div class="sep"></div>
+    <span class="tag">vista</span>
+    <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
+    <div class="sep"></div>
+    <span class="tag">taratura</span>
     <!-- vale per entrambi i pannelli audio: sono timbrati dallo stesso orologio -->
     <label>offset audio <input type="number" id="aoff" value="0" step="5"> ms</label>
     <!-- L'inviluppo del MyoWare è hardware e causale: SEGUE il muscolo di qualche
          decina di ms. Questo lo riallinea nel disegno; i campioni e il CSV restano
          come li ha timbrati il firmware. -->
     <label>EMG <input type="number" id="eoff" value="0" step="10"> ms</label>
-    <div class="sep"></div>
-    <label>finestra <input type="number" id="win" value="5" min="0.5" max="60" step="0.5"> s</label>
-    <div class="sep"></div>
     <label>Hz <input type="number" id="rate" value="100" min="1" max="2000" step="1"></label>
     <button id="btnRate">Applica</button>
     <div class="sep"></div>
@@ -58,13 +73,16 @@
     <label><input type="checkbox" id="recEmg" checked> sensore</label>
     <label><input type="checkbox" id="recPitch" checked> pitch</label>
     <label><input type="checkbox" id="recSpec" checked> spettro</label>
+    <div class="sep"></div>
+    <span class="tag">strumenti</span>
+    <!-- Il simulatore è sceso qui dalla riga dei collegamenti: non è un modo di
+         collegarsi, è uno strumento da sviluppo — e la demo da far vedere a
+         qualcuno è un video registrato, non una funzione dell'app. -->
+    <button id="btnDemo" title="dati finti, per provare l'app senza hardware">Simulatore</button>
     <!-- Tutta la memoria, non la registrazione: quella ha i suoi CSV dentro
          "Salva video + CSV", e i due esiti sono diversi abbastanza da dover
          avere due nomi diversi. -->
     <button id="btnCsv" title="tutti i campioni in memoria, registrazione o no: la registrazione ha i suoi CSV">CSV live</button>
-    <div class="sep"></div>
-    <!-- Il settimo pulsante non sta nella riga di connessione: la fase 4 aveva
-         lasciato scritto che il prossimo andava nel cassetto, ed è questo. -->
     <button id="btnCal" title="riposo, massimo, accenti, riferimento: dà un'unità ai count">Calibra</button>
     <button id="btnMarks" title="cerca i momenti fuori dalla zona verde in quello che hai registrato, col loro numero">Momenti</button>
     <div class="grow"></div>
@@ -72,6 +90,134 @@
 </header>
 
 <main>
+
+  <!-- ============================== gli ingressi ==============================
+       Due interruttori e un comando, e nient'altro: al posto dei sei pulsanti
+       (seriale, BLE, simulatore, disconnetti, microfono, registra) che erano
+       sei perché sei sono i modi in cui il codice ci arriva, non perché siano
+       sei le cose da decidere. Le cose da decidere sono tre: cosa entra, cosa
+       entra, e se stai registrando.
+
+       Nessuna etichetta di stato accanto all'interruttore: la dice
+       l'interruttore. Il testo torna solo per ciò che un interruttore non sa
+       dire — "sto collegando…" e un errore. -->
+  <div class="rack" id="rack">
+    <!-- `role=switch` e non una checkbox travestita: chi legge con uno screen
+         reader sente "Sensore, interruttore, disattivato", che è esattamente
+         quello che si vede. -->
+    <button class="src" id="swSens" role="switch" aria-checked="false">
+      <span class="sw"></span>
+      <span class="src-n">Sensore</span>
+      <span class="src-s" id="sensSt"></span>
+      <span class="recdot"></span>
+    </button>
+
+    <button class="src" id="swMic" role="switch" aria-checked="false">
+      <span class="sw"></span>
+      <span class="src-n">Microfono</span>
+      <span class="recdot"></span>
+    </button>
+
+    <span class="rack-sp"></span>
+
+    <!-- Un comando solo, che cambia con la fase: Registra → Ferma → Torna al
+         vivo. Non tre pulsanti che convivono, perché le tre cose non convivono. -->
+    <span class="fase">
+      <button class="rec-btn" id="btnPresa">Registra</button>
+      <span class="rec-time" id="recTime"></span>
+      <button class="torna" id="btnVivo">&larr; Torna al vivo</button>
+    </span>
+
+    <!-- Le due cose secondarie della schermata stavano qui in chiaro: una `i` che
+         apriva mezzo schermo di spiegazioni, e l'interruttore dei modi scritto per
+         esteso. La `i` non c'è più — su 390 px il suo pannellino usciva dal bordo
+         sinistro, e soprattutto spiegava una schermata che si spiega da sé: due
+         interruttori, un numero e un comando rosso. L'interruttore dei modi è
+         sceso dentro il menu: un comando che si tocca una volta al mese non
+         merita una parola sempre a schermo. Resta una rotellina, che è anche il
+         posto dove mettere le opzioni che verranno. -->
+    <span class="rack-min">
+    <details class="menu" id="menuBox">
+      <summary aria-label="opzioni"></summary>
+      <div class="menu-b">
+        <!-- Quanto tempo si vede. È lo STESSO `#win` dell'avanzato — un campo
+             solo, due modi di toccarlo — ma qui a scatti: i quattro valori che
+             servono cantando, invece di una casella numerica da compilare. -->
+        <div class="menu-r">
+          <span class="menu-k">Finestra</span>
+          <span class="seg" id="segWin">
+            <button type="button" data-w="3">3 s</button>
+            <button type="button" data-w="5">5 s</button>
+            <button type="button" data-w="10">10 s</button>
+            <button type="button" data-w="30">30 s</button>
+          </span>
+        </div>
+        <!-- L'unico comando che esiste in tutti e due i modi, e l'unica via fra
+             loro. Dice DOVE PORTA, non dove sei: un interruttore etichettato col
+             proprio stato si legge al contrario metà delle volte. -->
+        <button id="btnModo2" class="modo mi" aria-pressed="false">Avanzato</button>
+      </div>
+    </details>
+    </span>
+
+    <!-- Chiesto una volta sola, e solo se il browser sa fare tutti e due: sul
+         telefono Web Serial non esiste e non si chiede niente. Oggi invece
+         "Collega seriale" era il primo pulsante ed era pure blu — su Android il
+         primo tocco di un non tecnico era quello sbagliato. -->
+    <div class="scelta" id="scelta">
+      <span>Come è collegato il sensore?</span>
+      <button class="big" id="scBle">Bluetooth</button>
+      <button id="scSer">Col cavo</button>
+      <button class="x" id="scX" aria-label="annulla">&times;</button>
+    </div>
+
+    <!-- L'errore sotto il comando che l'ha causato, non in fondo alla pagina. -->
+    <div class="rkerr" id="rackErr"></div>
+
+    <!-- Si chiede, non si vieta: spegnere "Torna al vivo" bloccherebbe anche il
+         caso legittimo in cui quella presa la si vuole buttare. -->
+    <div class="conferma" id="conferma">
+      <p id="cfTxt"></p>
+      <button class="big" id="cfSave">Salvala prima</button>
+      <button id="cfDrop">Torna al vivo lo stesso</button>
+    </div>
+  </div>
+
+  <!-- Lo stato vuoto ha preso il posto della landing page che era stata
+       valutata: i comandi di collegamento devono stare comunque nella pagina coi
+       grafici, quindi una seconda schermata sarebbe da mantenere per niente. -->
+  <section class="card vuoto" id="vuoto">
+    <!-- Il nome dell'app compare qui e solo qui: nel semplice l'header non c'è
+         più, e l'unico momento in cui serve sapere su cosa si è atterrati è
+         quello in cui non è ancora successo niente. -->
+    <p class="marca">MyoLink</p>
+    <h2>Accendi il sensore per cominciare</h2>
+    <p>Mettilo sull'addome e attivalo qui sopra. Il microfono è separato e si può usare anche da solo.</p>
+    <div><button class="big" id="vuotoGo">Attiva il sensore</button></div>
+  </section>
+
+  <!-- ============================== il riquadro ==============================
+       Una parola, un numero, la nota e un indicatore che oscilla. La parola dice
+       il SIGNIFICATO e non il colore: "Verde" accanto a un fondo verde non
+       aggiunge niente, "Sforzo normale" sì — e continua a funzionare per chi i
+       rossi dai verdi non li distingue. -->
+  <section class="sem" id="riq" data-z="">
+    <div class="sem-top">
+      <div class="sem-say" id="riqSay">&mdash;</div>
+      <!-- Niente etichette sopra i due numeri. C'erano — «ADESSO» sul valore e
+           «NOTA» sulla nota — e dicevano cose che i numeri dicono già: il numero
+           grande di un riquadro dal vivo È adesso, e una nota si riconosce
+           perché è una nota. In revisione il tempo lo dice la striscia, che è
+           dove si sta navigando. -->
+      <div class="sem-val" id="riqVal">&mdash;</div>
+      <!-- Larghezza fissa in `ch` e `visibility` invece di `hidden`: la nota va e
+           viene a ogni pausa, e un riquadro che si allarga e si stringe a ogni
+           frase è la cosa che si nota al posto della misura. -->
+      <div class="sem-nota" id="riqNotaBox"><span id="riqNota">&mdash;</span></div>
+    </div>
+    <div class="meter" id="riqMeter"><div class="meter-t"></div><span class="meter-now" id="riqNow"></span></div>
+  </section>
+
   <!-- Solo in portrait su schermo stretto: 390 px di larghezza per 5 secondi di
        storia sono 78 pixel al secondo, in landscape più del doppio. -->
   <p class="rotate" id="rotate">
@@ -95,19 +241,32 @@
         <!-- 1000 = fondo scala del simulatore; col sensore reale metti 4095 (ADC 12 bit) -->
         <label>Y <input type="number" id="ymin" value="0"> – <input type="number" id="ymax" value="1000"></label>
         <button id="btnAuto">Auto Y</button>
-        <div class="sep"></div>
-        <!-- Le tre tracce si accendono e si spengono una per una: sono tre cose
-             diverse sovrapposte, e spesso se ne guarda una sola — la nuvola dei
-             grezzi copre le altre due quando si cerca un artefatto, e la linea
-             colorata da sola è la lettura che va nel video. L'etichetta ha il
-             colore della sua riga, così la casella è anche la legenda. -->
-        <span class="tag">tracce</span>
-        <label class="trk raw" title="i campioni come li ha timbrati il firmware"><input type="checkbox" id="trRaw" checked> grezza</label>
-        <label class="trk med" title="mediana a 300 ms: la linea su cui lavorano i rilevatori"><input type="checkbox" id="trMed" checked> mediana</label>
-        <label class="trk fat" title="mediana a 2 s meno il riposo, col colore della zona — con le sue due righe a +30 e +55"><input type="checkbox" id="trFat" checked> fatica</label>
+        <!-- Le tre tracce non si accendono più da qui: il loro comando È la
+             legenda sotto il grafico, che vale in tutti e due i modi. -->
       </div>
     </div>
-    <div class="body"><canvas id="chart"></canvas></div>
+    <div class="body">
+      <canvas id="chart"></canvas>
+    </div>
+    <!-- ===== la legenda È il comando =====
+         Tre voci in fila sotto il grafico, ognuna col colore della sua riga, e si
+         clicca per spegnerla. Ha preso il posto di DUE cose che facevano lo stesso
+         lavoro in due posti diversi: le tre caselle nella barra del pannello (che
+         nel semplice non esiste) e il pulsantino «curve» appiccicato dentro il
+         grafico, che era un comando travestito da nota a margine. Una legenda
+         invece è la cosa che uno cerca quando non sa cosa sia una riga, e qui è
+         anche l'interruttore di quella riga.
+
+         Le due memorie sono separate per modo: quello che si vuole vedere mentre
+         si canta non è quello che si vuole vedere mentre si cerca un artefatto. -->
+    <div class="leg" id="legEmg">
+      <button type="button" class="leg-i raw" data-trk="raw"
+              title="i campioni come li ha timbrati il firmware"><i></i>grezza</button>
+      <button type="button" class="leg-i med" data-trk="med"
+              title="mediana a 300 ms: la linea su cui lavorano i rilevatori"><i></i>mediana</button>
+      <button type="button" class="leg-i fat" data-trk="fat"
+              title="mediana a 2 s meno il riposo, col colore della zona — con le sue due righe a +30 e +55"><i></i>sforzo</button>
+    </div>
     <div class="grip"></div>
   </section>
 
@@ -159,6 +318,23 @@
        "vedere al volo su cinque minuti" — una lista da scorrere no. I comandi
        sono due e stanno qui: quanti punti vuoi, e cosa stai cercando. -->
   <section class="panel" id="pMarks" hidden>
+    <!-- Nella fase «la presa» questo pannello non è più uno dei quattro: è il
+         soggetto. Sale in cima (CSS, `order`), porta in testa la sua scheda e in
+         fondo la propria navigazione, e la striscia smette di essere una mappa
+         per diventare la barra con cui ci si sposta dentro la registrazione. -->
+    <div class="presa-h">
+      <h3 id="presaN">Presa</h3>
+      <span class="presa-meta num" id="presaDur"></span>
+      <span class="badge" id="presaBadge"></span>
+      <span class="sp">
+        <button class="big" id="presaSave">Salva</button>
+        <button id="presaDrop">Elimina</button>
+      </span>
+    </div>
+    <div class="riass">
+      <div class="zone-bar" id="zbar"></div>
+      <div class="zone-leg" id="zleg"></div>
+    </div>
     <div class="bar">
       <button class="fold" title="comprimi"></button>
       <span class="tag">momenti</span>
@@ -179,6 +355,17 @@
       <canvas id="strip"></canvas>
       <div id="mkList"></div>
     </div>
+    <!-- Due frecce, dove sei, e il play. Nel modo semplice prende il posto della
+         lista: venti righe da scorrere rispondono a "quali sono", la striscia coi
+         suoi due comandi risponde a "portami lì", che è quello che si fa. -->
+    <div class="nav">
+      <button id="nvPlay">&#9654; Ascolta</button>
+      <span class="qui" id="nvQui"></span>
+      <span class="sp">
+        <button id="nvPrev">&larr; prima</button>
+        <button id="nvNext">dopo &rarr;</button>
+      </span>
+    </div>
     <div class="grip"></div>
   </section>
 
@@ -186,6 +373,18 @@
   <div id="log"></div>
   <details class="hint" id="hintBox">
     <summary>Requisiti, limiti e come si legge</summary>
+    <p>
+      <strong>Due modi.</strong> <em>Semplice</em> è quello con cui si canta: due interruttori
+      (sensore e microfono), un riquadro che dice quanto stai spingendo, e i grafici. <em>Avanzato</em>
+      è questa pagina, con tutti i comandi, le misure e il registro. L'interruttore in alto passa
+      dall'uno all'altro e la scelta si ricorda.
+      <strong>Due fasi</strong>, e sono la ragione per cui i comandi non si accavallano più:
+      <em>dal vivo</em> (o <em>registrando</em>, che è la stessa vista più il tempo e i pallini rossi
+      su ogni ingresso incluso) e <em>la presa</em>, dove tutto è fermo sulla registrazione appena
+      fatta e la striscia dei momenti è la navigazione. <em>Registra</em> non esiste mentre guardi una
+      presa, <em>Salva</em> ed <em>Elimina</em> non esistono dal vivo: per registrare di nuovo si torna
+      al vivo, ed è lì che l'app chiede se salvare quella che stai per perdere.
+    </p>
     <p>
       Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
       <code>http://localhost</code> — non <code>file://</code>. In locale: <code>npm run dev</code>.
@@ -199,17 +398,22 @@
       <em>Calibra</em> misura riposo, massimo e appoggio di riferimento: senza, i count non hanno unità e
       sul grafico non compaiono le due righe tratteggiate del riposo e del riferimento.
       Il <strong>semaforo della fatica</strong> invece non ha bisogno di calibrazione: il suo zero è il
-      5° percentile del livello sugli ultimi due minuti, e servono una ventina di secondi di storia
-      prima che si accenda. Legge una finestra di 2&nbsp;s, quindi è in ritardo di circa un secondo su
+      5° percentile del livello sugli ultimi due minuti, e gli bastano cinque secondi di storia
+      prima di accendersi — chi comincia a cantare subito ottiene per qualche secondo uno zero
+      troppo alto, che la finestra mobile corregge da sé. Legge una finestra di 2&nbsp;s, quindi è in ritardo di circa un secondo su
       quello che descrive — e le fasce del grafico, la linea colorata e i momenti dicono tutti lo
       stesso numero. I due confini (+30 e +55 count sopra il riposo) sono tarati su una sessione sola:
       spostando gli elettrodi vanno rifatti.
-      Le tre caselle <code>tracce</code> nella barra del sensore accendono e spengono le tre letture
-      sovrapposte — i campioni grezzi, la mediana a 300&nbsp;ms, la linea della fatica con le sue due righe:
-      partono accese, e quello che spegni qui non finisce nemmeno nel video.
+      La <strong>legenda sotto il grafico del sensore</strong> è anche il suo comando: le tre voci sono le tre
+      letture sovrapposte — i campioni grezzi, la mediana a 300&nbsp;ms, la linea dello sforzo con le sue due
+      righe — e si cliccano per spegnerle. In avanzato partono tutte e tre accese, nel semplice solo lo sforzo,
+      e le due scelte si ricordano separate; quello che spegni qui non finisce nemmeno nel video.
       Il pitch è monofonico: con una base in cassa il microfono sente due sorgenti e la stima si
-      aggancia alla più forte — con le cuffie resta pulita. La striscia sotto la linea dice quanto
-      fidarsi, la barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
+      aggancia alla più forte — con le cuffie resta pulita. Sotto la linea, <strong>solo in avanzato</strong>,
+      corre la striscia della <em>clarity</em>: verde dove la stima supera la soglia, gialla dove ci passa
+      vicino, rosso scuro dove non è credibile — silenzio, consonanti, due sorgenti insieme. Non è un dato
+      musicale, è il grado di fiducia della stima: nel semplice non c'è, e lo stesso lo dicono già i buchi
+      della linea. La barra dei pannelli li comprime e il bordo inferiore li ridimensiona.
       <em>Disconnetti</em> chiude il link col device: i dati già letti restano in memoria, e i grafici
       si fermano sull'ultimo campione.
       <em>Registra</em> prepara un <code>.mp4</code> con i pannelli spuntati sotto ⚙ e l'audio del microfono, se
@@ -222,7 +426,8 @@
       basi dei tempi), registrazione o no. Il CSV è l'unico formato con cui una prova si rianalizza.
       <em>Momenti</em> cerca i punti caldi nella registrazione appena fatta: due comandi, <code>quanti punti</code>
       e cosa cerchi, e nessuna soglia — i punti sono ordinati rispetto a questa registrazione, non a una scala
-      assoluta. La striscia è tutta la registrazione: cliccala per guardare lì, <code>n</code> e <code>p</code>
+      assoluta. La striscia è tutta la registrazione: cliccala per guardare lì oppure <strong>trascinala</strong>
+      per scorrerla — i tre pannelli seguono il dito — <code>n</code> e <code>p</code>
       per il punto dopo e quello prima, <code>✓/✗</code> per tenere o scartare. I falsi positivi sono voluti:
       chi ascolta filtra meglio di qualunque soglia. <em>Registra</em> non serve: senza registrazione si
       analizza quello che viene dopo la calibrazione, e c'è scritto nella barra del pannello.

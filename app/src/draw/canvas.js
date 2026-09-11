@@ -30,7 +30,9 @@ function setPad(w) {
   PAD.r = narrow ? 30 : 40;
 }
 export const SPAD = { t: 10, b: 10 };
-export const PPAD = { t: 10, b: 16 };                // b: ci sta la striscia di clarity
+// b: ci stanno la striscia di clarity (solo in avanzato) e sotto le etichette
+// dei tempi, che il pannello del pitch scrive come quello del sensore.
+export const PPAD = { t: 10, b: 26 };
 
 // Un pannello compresso o nascosto ha dimensione 0: il canvas la segue e chi
 // disegna si limita a saltarlo.

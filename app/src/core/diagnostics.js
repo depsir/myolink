@@ -42,10 +42,29 @@ export const SERIAL_HINT = {
   SecurityError: "contesto non sicuro: servono https oppure http://localhost.",
 };
 
+// ---- dove va a finire un errore ----
+//
+// Nel log ci va sempre: è la storia della sessione, e da lì si diagnostica un
+// "non parte" raccontato al telefono. Ma il log, nel modo semplice, non c'è —
+// e anche quando c'è sta in fondo alla pagina, lontano dal pulsante che ha
+// appena fallito. Chi ha premuto "Sensore" e non è successo niente deve
+// leggere il perché SOTTO quel pulsante, non a due schermate di distanza.
+//
+// Queste istruzioni erano già scritte bene (i tre dizionari qui sopra): l'unica
+// cosa che mancava era una via per farle arrivare anche a chi le guarda.
+let sink = null;
+export function setFailSink(fn) { sink = fn; }
+
+// Un fallimento senza eccezione: il permesso già negato, per esempio, non lancia
+// niente — il prompt semplicemente non compare. È lo stesso evento per chi
+// guarda, quindi passa dalla stessa porta.
+export function segnala(what, msg, hint) { sink?.(what, msg, hint || ""); }
+
 export function logFail(what, e, hints) {
   log(what + ": " + errText(e));
   const h = hints[e?.name];
   if (h) log("   → " + h);
+  segnala(what, errText(e), h);
 }
 
 // Non tutti i browser espongono questo nome nella Permissions API; l'assenza non

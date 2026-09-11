@@ -45,12 +45,30 @@ la catena senza sensore attaccato** — genera un random walk con inerzia in
 che rimbalza sui bordi invece di saturare, così un clipping vero non si confonde
 col simulatore.
 
-**App.** Pronta all'uso su <https://myolink.vercel.app>, in Chrome o Edge:
-*Collega seriale* (desktop) oppure *Collega BLE* (desktop e Android). Collegato,
-la lettura è continua e non si mette in pausa: *Disconnetti* chiude il link — i
-dati già letti restano in memoria, e i grafici si fermano sull'ultimo campione.
-Registrare è una cosa a parte, e si può accendere e spegnere quante volte si vuole
-mentre il link resta aperto.
+**App.** Pronta all'uso su <https://myolink.vercel.app>, in Chrome o Edge.
+
+Si apre in **modo semplice**, che è quello con cui si canta: due interruttori —
+*Sensore* e *Microfono* — un riquadro che dice quanto stai spingendo, e i
+grafici. Gli ingressi sono uno stato permanente e la registrazione è un'azione
+sopra di essi: se registri, registri tutto quello che è acceso, e ogni ingresso
+incluso porta il suo pallino rosso. Ci sono **due fasi e non cinque stati**: *dal
+vivo* (o *registrando*, che è la stessa vista più il tempo) e *la presa*, dove
+tutto è fermo sulla registrazione appena fatta e la striscia dei momenti è la
+navigazione. *Registra* non esiste mentre guardi una presa, *Salva* ed *Elimina*
+non esistono dal vivo — per rifare si torna al vivo, ed è lì che l'app chiede se
+salvare quella che stai per perdere. Il perché di ognuna di queste scelte sta in
+[docs/PIANO-fase7.md](docs/PIANO-fase7.md).
+
+L'interruttore in alto passa al **modo avanzato**, che è quello descritto nel
+resto di questo file: tutti i comandi, le misure in tre famiglie, il registro.
+La scelta si ricorda. Lì i collegamenti sono espliciti — *Collega seriale*
+(desktop) oppure *Collega BLE* (desktop e Android) — e ci sono il *Simulatore* e
+la *Calibrazione*, che nel semplice non compaiono.
+
+Collegato, la lettura è continua e non si mette in pausa: *Disconnetti* chiude il
+link — i dati già letti restano in memoria, e i grafici si fermano sull'ultimo
+campione. Registrare è una cosa a parte, e si può accendere e spegnere quante
+volte si vuole mentre il link resta aperto.
 
 Per modificarla:
 
@@ -77,14 +95,19 @@ headless via CDP legge lo stato da lì.
 Il campo **Y** va messo `0`–`1000` col simulatore del firmware e `0`–`4095` col
 sensore reale (ADC a 12 bit); il pulsante *Auto Y* lo calcola sui dati visibili.
 
-Le tre caselle **`tracce`** accendono e spengono le tre letture sovrapposte del
-segnale — `grezza` i campioni, `mediana` la mediana a 300 ms, `fatica` la linea
-colorata per zona con le sue due righe a +30 e +55. Partono tutte accese e non si
-ricordano: si spegne quello che copre il resto *mentre* si guarda. La nuvola dei
-grezzi nasconde le altre due proprio quando servono, e la linea della fatica —
-2 px e opaca — copre la mediana ogni volta che il segnale è fermo. Il numero in
-alto a sinistra resta anche a tracce tutte spente: è la lettura, non una traccia.
-**Il video segue le caselle**, perché il registratore copia questo canvas.
+La **legenda sotto il grafico** è anche il suo comando: le tre voci sono le tre
+letture sovrapposte del segnale — `grezza` i campioni, `mediana` la mediana a
+300 ms, `sforzo` la linea colorata per zona con le sue due righe a +30 e +55 — e
+si cliccano per spegnerle. La nuvola dei grezzi nasconde le altre due proprio
+quando servono, e la linea dello sforzo — 2 px e opaca — copre la mediana ogni
+volta che il segnale è fermo. Il numero in alto a sinistra resta anche a tracce
+tutte spente: è la lettura, non una traccia. **Il video segue la legenda**,
+perché il registratore copia questo canvas.
+
+Le scelte si ricordano, e sono **due memorie separate per modo**: in avanzato
+partono tutte e tre accese, nel semplice solo lo sforzo. Quello che si vuole
+vedere mentre si canta non è quello che si vuole vedere mentre si cerca un
+artefatto, e il modo è già la parola che distingue i due casi.
 
 Il pulsante **Simulatore** è una cosa diversa da `MYO_SIMULATE`: genera i
 pacchetti *dentro il browser*, con perdite e stalli radio artificiali, e serve
@@ -328,8 +351,13 @@ debole della seconda o terza armonica, e si sbaglierebbe l'ottava di continuo.
 
 **La clarity è la cosa importante.** È `1 − CMND` al minimo scelto, cioè quanto
 il segnale è davvero periodico: la striscia colorata sotto la linea la mostra
-istante per istante. Su voce pulita sta sopra 0.95; sul silenzio, sulle
+istante per istante — verde sopra soglia, gialla appena sotto, rosso scuro dove
+la stima non è credibile. Su voce pulita sta sopra 0.95; sul silenzio, sulle
 consonanti e sul rumore crolla, e la linea si spezza — che è la risposta onesta.
+La striscia c'è **solo in avanzato**: è il modo in cui si tara la soglia, che è
+un comando di lì. Nel semplice non c'è, perché lì non è spiegata da niente e una
+fila di puntini colorati sotto un grafico viene letta come un secondo grafico —
+mentre quello che dice si vede già nei buchi della linea.
 
 Due limiti da conoscere:
 

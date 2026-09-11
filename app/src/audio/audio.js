@@ -12,7 +12,7 @@ import { spec, pitch, T } from "../core/state.js";
 import { P, PITCH_FFT, PITCH_HOP, setupYin, yin } from "./pitch.js";
 import { micAttach, micDetach } from "./bus.js";
 import { TP, tapeClose, tapeOpen } from "./tape.js";
-import { logFail, micPermission, MIC_HINT } from "../core/diagnostics.js";
+import { logFail, micPermission, segnala, MIC_HINT } from "../core/diagnostics.js";
 import { resize } from "../draw/canvas.js";
 import { $, log, setLabel } from "../ui/dom.js";
 
@@ -38,7 +38,11 @@ export async function toggleAudio() {
   // far premere un pulsante che non fa niente.
   if (await micPermission() === "denied") {
     log("microfono: permesso negato, il browser non mostrerà nessun prompt.");
-    return log("   → " + MIC_HINT.NotAllowedError);
+    log("   → " + MIC_HINT.NotAllowedError);
+    // Non c'è nessuna eccezione da cui passare: il prompt semplicemente non
+    // comparirà. Per chi guarda è identico a un fallimento, e va detto lì.
+    return segnala("microfono", "permesso negato: il browser non mostrerà nessun prompt.",
+                   MIC_HINT.NotAllowedError);
   }
   try {
     // I filtri pensati per le chiamate vocali sono l'opposto di ciò che serve

@@ -82,7 +82,9 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 /* Come le righe dell'header: su desktop il contenitore dei controlli non esiste. */
 .panel .ctl { display: contents; }
 .panel.folded .bar { border-bottom: 0; }
-.panel.folded .body, .panel.folded .grip { display: none; }
+/* Compresso resta la sola barra: anche la legenda va via, altrimenti sotto il
+   titolo resterebbe la scala dei colori di un grafico che non c'è. */
+.panel.folded .body, .panel.folded .grip, .panel.folded .leg { display: none; }
 .panel .body { position: relative; }
 /* Le altezze stanno qui e non in `style=` sull'elemento: uno stile inline
    vincerebbe su qualunque media query. Il grip continua a scriverle inline —
@@ -92,20 +94,39 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 #pPitch .body { height: 190px; }
 #pSpec .body { height: 320px; }
 canvas { display: block; width: 100%; height: 100%; }
+/* La striscia dei momenti è una barra di navigazione che si trascina: senza
+   `touch-action`, sul telefono il browser interpreta il trascinamento come uno
+   scorrimento della pagina e il cursore non si muove. Stessa ragione del grip. */
+#strip { cursor: ew-resize; touch-action: none; }
 .bar .tag { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
 .bar input[type=number] { width: 60px; }
-/* Le caselle delle tre tracce sono anche la legenda: l'etichetta ha il colore
-   della riga che accende, così non serve una legenda a parte dentro il canvas —
-   che sarebbe un quarto elemento a contendersi lo stesso spazio. La fatica
-   cambia colore per zona: prende il verde, che è la zona in cui si sta quasi
-   sempre. Spenta, l'etichetta torna grigia come qualunque controllo inattivo. */
-.trk { font-size: 12px; }
-.trk.raw { color: #4ea1ff; }
-.trk.med { color: var(--fg); }
-.trk.fat { color: var(--ok); }
-.trk:has(input:not(:checked)) { color: var(--dim); }
-.trk.med input { accent-color: var(--fg); }
-.trk.fat input { accent-color: var(--ok); }
+/* ===== la legenda del grafico del sensore =====
+   Tre voci in fila sotto il grafico, il colore della riga in un trattino davanti,
+   e si clicca per spegnerla. Sta SOTTO e non dentro il grafico: dentro era un
+   comando appiccicato sopra i dati, sotto è dove una legenda si cerca. Esiste in
+   tutti e due i modi — è l'unica cosa che comanda le tre tracce — e ha preso il
+   posto delle tre caselle in barra (che nel semplice non c'erano) e del
+   pulsantino «curve» (che nell'avanzato non c'era). */
+.leg {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px;
+  padding: 3px 7px 5px; background: var(--panel); border-top: 1px solid var(--line);
+}
+.leg-i {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 32px;
+  background: none; border: 0; border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; color: var(--dim);
+}
+.leg-i:hover:not(:disabled) { background: #1b222c; border: 0; }
+.leg-i i { width: 15px; height: 3px; border-radius: 2px; background: currentColor; flex: 0 0 auto; }
+/* Accesa, l'etichetta ha il colore della sua riga: la legenda È la scala dei
+   colori del grafico, quindi non può usarne di propri. La linea dello sforzo
+   cambia colore per zona e qui prende il verde, che è dove si sta quasi sempre. */
+.leg-i[aria-pressed=true].raw { color: #4ea1ff; }
+.leg-i[aria-pressed=true].med { color: var(--fg); }
+.leg-i[aria-pressed=true].fat { color: var(--ok); }
+/* Spenta: grigia, e il trattino resta come contorno vuoto — il colore non è mai
+   l'unico segno, e «vuoto» si legge anche senza distinguere il verde dal grigio. */
+.leg-i[aria-pressed=false] i { background: none; box-shadow: inset 0 0 0 1px currentColor; }
 .fold { width: 22px; padding: 3px 0; line-height: 1; font-size: 10px; text-align: center; }
 .panel.folded .fold::before { content: "\25B8"; }    /* ▸ chiuso */
 .fold::before { content: "\25BE"; }                   /* ▾ aperto */
@@ -352,4 +373,402 @@ li.run .calState { color: var(--acc); }
   #pEmg .body { height: 24vh; height: 24svh; }
   #pPitch .body { height: 18vh; height: 18svh; }
   #pSpec .body { height: 22vh; height: 22svh; }
+}
+
+/* ==================================================================
+   FASE 7 — DUE MODI E DUE FASI
+   ==================================================================
+   Tutto quello che segue è nuovo e vive dietro due attributi sul body:
+
+     data-modo = semplice | avanzato     quanto mostrare
+     data-fase = vivo | registrando | presa    che cosa stai facendo
+     data-ing  = niente | sens | voce | tutto  cosa sta entrando
+
+   **In avanzato l'app resta identica a prima.** Gli elementi nuovi
+   nascono `display:none` e si accendono solo sotto `[data-modo=semplice]`;
+   nessuna regola di questo blocco tocca il modo avanzato se non per
+   l'unico comando che esiste in tutti e due, l'interruttore fra i modi.
+   Questo è anche il motivo per cui non c'è un secondo foglio di stile:
+   due fogli si sarebbero scollati alla prima modifica. */
+
+.rack, #vuoto, #riq, .presa-h, .riass, .nav { display: none; }
+
+/* L'unica via fra i due modi, e sta in tutti e due. */
+.modo { font-size: 12px; padding: 5px 10px; }
+
+/* ---------- che cosa sparisce nel modo semplice ----------
+   Non è "meno roba": è che ogni cosa tolta qui ha un posto dove sta meglio.
+   Il log e le 24 tessere rispondono a "il BLE regge?", che è una domanda da
+   modo avanzato; le barre dei pannelli portano controlli per cui nel semplice
+   non c'è niente da scegliere; lo spettrogramma è bello e non ci si è ancora
+   ragionato sopra, quindi non è ciò che deve occupare mezzo telefono. */
+body[data-modo=semplice] .hrow.conn,
+body[data-modo=semplice] .hrow.cfg,
+body[data-modo=semplice] #btnCfg,
+body[data-modo=semplice] #stats,
+body[data-modo=semplice] #log,
+body[data-modo=semplice] .hint,
+body[data-modo=semplice] .rotate,
+body[data-modo=semplice] #pSpec,
+body[data-modo=semplice] .panel .bar,
+body[data-modo=semplice] .panel .grip,
+body[data-modo=semplice] #mkList,
+/* Lo stato del link è già l'interruttore: scriverlo accanto sarebbe
+   l'etichetta ridondante che tutta la fase 7 toglie. */
+body[data-modo=semplice] #status { display: none; }
+
+/* **Nel semplice l'header non c'è.** Prima era solo `position: static` — non
+   appiccicato in alto, per non sovrapporsi alla rastrelliera che è anche lei
+   sticky — e restava lì a occupare una riga intera per il nome dell'app, il
+   pallino dello stato (già spento qui sopra: lo dice l'interruttore) e un
+   comando che si tocca una volta al mese. «Occupa spazio ed è brutto», ed è
+   vero: quella riga non aveva un solo elemento che servisse mentre si canta.
+   Il suo unico comando vivo scende accanto alla `i`, dentro la rastrelliera; il
+   nome dell'app resta nello stato vuoto, che è il solo momento in cui serve. */
+body[data-modo=semplice] header { display: none; }
+
+body[data-modo=semplice] .rack,
+body[data-modo=semplice] .presa-h,
+body[data-modo=semplice] .riass,
+body[data-modo=semplice] .nav { display: flex; }
+body[data-modo=semplice] #riq { display: block; }
+
+/* Senza barra il pannello è solo il grafico, e il bordo superiore non serve. */
+body[data-modo=semplice] .panel { background: var(--panel); }
+
+/* ---------- i grafici prendono l'altezza che c'è ----------
+   Le altezze erano numeri: 300 px e 200 px, scelti su una finestra sola. Su uno
+   schermo alto restava un terzo di pagina vuoto sotto, e su uno basso si
+   scrollava — cioè il difetto stava in tutte e due le direzioni, che è il segno
+   che il numero era sbagliato in quanto numero.
+   Adesso `main` è alto almeno un viewport e i due pannelli se lo dividono
+   crescendo: `flex: n 1 0` dà le PROPORZIONI (il sensore una volta e mezzo il
+   pitch, che è l'ordine di importanza) invece delle misure, e quello che avanza
+   dopo la rastrelliera e il riquadro finisce nei grafici. Il `min-height` sul
+   corpo è l'unica misura rimasta, ed è il punto sotto il quale un grafico non
+   dice più niente. */
+body[data-modo=semplice] main { min-height: 100vh; min-height: 100svh; }
+body[data-modo=semplice] #pEmg,
+body[data-modo=semplice] #pPitch { display: flex; flex-direction: column; min-height: 0; }
+body[data-modo=semplice] #pEmg { flex: 1.5 1 0; }
+body[data-modo=semplice] #pPitch { flex: 1 1 0; }
+body[data-modo=semplice] #pEmg .body,
+body[data-modo=semplice] #pPitch .body { height: auto; flex: 1 1 0; min-height: 96px; }
+/* Con un'altezza che viene dal flex, l'altezza percentuale del canvas dipende da
+   un valore che il browser calcola dopo: posizionato, invece, riempie il corpo
+   qualunque cosa decida il layout. Il ResizeObserver di `draw/canvas.js` fa il
+   resto, come già faceva quando le altezze erano in `svh`. */
+body[data-modo=semplice] #pEmg .body > canvas,
+body[data-modo=semplice] #pPitch .body > canvas { position: absolute; inset: 0; }
+/* La striscia è alta 74px per costruzione: qui il corpo è solo lei, perché la
+   lista non c'è. */
+body[data-modo=semplice] #pMarks .body { height: 82px; }
+
+/* ---------- lo stato «non è ancora entrato niente» ----------
+   I grafici vuoti non sono neutri: sono uno schermo che sembra rotto. Finché non
+   entra qualcosa la schermata è UNA cosa sola — la rastrelliera e l'invito — e
+   prende tutta la pagina: `flex: 1` al posto dei suoi 256 px di contenuto, così
+   sotto non resta il rettangolo scuro di un grafico che non ha niente da
+   disegnare.
+
+   I pannelli si spengono per ID e non con `.panel`. Non è pedanteria: le regole
+   che danno l'altezza ai due grafici sono per id, e un id batte qualunque numero
+   di classi — con `.panel` il grafico del sensore ricompariva sotto l'invito,
+   vuoto, esattamente il difetto che questa regola esiste per togliere. */
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #vuoto { display: flex; flex: 1 1 auto; }
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #riq,
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #pEmg,
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #pPitch,
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #pSpec,
+body[data-modo=semplice][data-ing=niente]:not([data-fase=presa]) #pMarks { display: none; }
+/* Un pannello senza la sua sorgente non c'è. La regola di partenza era
+   l'opposta («l'impaginazione non balla»), e aveva ragione chi l'ha contestata:
+   se sei TU a spegnere l'interruttore, il riquadro vuoto è spazio morto, non
+   coerenza. Col solo microfono restano la nota e basta. */
+body[data-modo=semplice][data-ing=voce] #pEmg,
+body[data-modo=semplice][data-ing=voce] #riq { display: none; }
+body[data-modo=semplice][data-ing=sens] #pPitch { display: none; }
+
+/* La scheda della presa esiste solo nella sua fase, e lì è il soggetto: sale
+   sopra i grafici, che in quella fase sono il dettaglio di ciò che racconta. */
+body[data-modo=semplice] #pMarks { display: none; }
+body[data-modo=semplice][data-fase=presa] #pMarks { display: block; order: -1; }
+
+/* ============================== gli ingressi ============================== */
+.rack {
+  order: -2; position: sticky; top: 0; z-index: 6;
+  flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding: 8px 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+  transition: border-color .2s, background .2s;
+}
+.src {
+  display: inline-flex; align-items: center; gap: 9px; min-width: 0;
+  background: none; border: 0; padding: 4px 6px; border-radius: 8px; color: var(--fg);
+}
+.src:hover:not(:disabled) { background: #1b222c; border: 0; }
+.sw {
+  flex: 0 0 auto; width: 34px; height: 20px; border-radius: 999px;
+  background: #2b3540; border: 1px solid var(--line); position: relative;
+  transition: background .18s, border-color .18s;
+}
+.sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #7d8b99; transition: transform .18s, background .18s;
+}
+.src[aria-checked=true] .sw { background: #1c4a2a; border-color: var(--ok); }
+.src[aria-checked=true] .sw::after { transform: translateX(14px); background: var(--ok); }
+.src-n { font-weight: 600; white-space: nowrap; }
+.src-s { color: var(--dim); font-size: 12.5px; white-space: nowrap; }
+.src-s:empty { display: none; }
+.rack-sp { flex: 1 1 auto; min-width: 0; }
+
+/* Il pallino di registrazione per ingresso: è il record-enable dei multitraccia,
+   e risponde a "cosa registra" esattamente dove nasce il dubbio. */
+.recdot { display: none; width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex: 0 0 auto; }
+body[data-fase=registrando] .src[aria-checked=true] .recdot { display: block; }
+
+.fase { display: inline-flex; align-items: center; gap: 11px; flex-wrap: nowrap; }
+/* L'unico colore saturo a riposo è il semaforo: il rosso del comando di
+   registrazione è l'eccezione, e proprio per questo non ce ne devono essere
+   altri accanto. Quando tutto è colorato, niente lo è. */
+.rec-btn {
+  background: var(--bad); border-color: var(--bad); color: #0b0f14; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 9px; white-space: nowrap;
+}
+.rec-btn:hover:not(:disabled) { background: #ff6b62; border-color: #ff6b62; }
+.rec-btn::before { content: ""; width: 11px; height: 11px; border-radius: 50%; background: #0b0f14; }
+body[data-fase=registrando] .rec-btn::before { border-radius: 2px; }
+.rec-time { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 17px; color: var(--bad); font-weight: 600; }
+.rec-time:empty { display: none; }
+.torna { white-space: nowrap; }
+/* «Registra» non esiste mentre guardi una presa, «Torna al vivo» non esiste dal
+   vivo: non si contendono lo schermo perché non convivono. */
+body[data-fase=presa] .rec-btn { display: none; }
+body:not([data-fase=presa]) .torna { display: none; }
+body[data-fase=registrando] .rack { border-color: #66302b; background: linear-gradient(180deg, #2a1413, var(--panel) 60%); }
+
+.scelta, .conferma {
+  display: none; flex: 0 0 100%; gap: 9px; align-items: center; flex-wrap: wrap;
+  border-top: 1px solid var(--line); margin-top: 2px; padding-top: 9px;
+}
+.rack.chiede .scelta, .rack.conferma-on .conferma { display: flex; }
+.rack.conferma-on { border-color: #5c4516; }
+.conferma p { margin: 0; font-size: 13px; flex: 1 1 22ch; min-width: 0; }
+.conferma b { color: var(--warn); }
+.scelta .x { margin-left: auto; background: none; border: 0; color: var(--dim); font-size: 18px; padding: 2px 8px; }
+
+/* L'errore sotto il comando che l'ha causato. Le istruzioni sono quelle di
+   core/diagnostics.js, che erano già scritte bene e finivano solo nel log. */
+.rkerr { flex: 0 0 100%; display: none; font-size: 12.5px; color: var(--warn); border-top: 1px solid #5c4516; margin-top: 2px; padding-top: 9px; }
+.rkerr.on { display: block; }
+.rkerr b { color: var(--fg); font-weight: 600; }
+.rkerr .x { float: right; background: none; border: 0; color: var(--dim); font-size: 16px; padding: 0 4px; min-height: 0; }
+
+/* La rotellina in fondo a destra, fuori dal flusso degli interruttori e del
+   comando di fase — che sono quello che si guarda. */
+.rack-min { display: inline-flex; align-items: center; }
+
+/* ===== la rotellina =====
+   Al posto della `i` e dell'«Avanzato» scritto per esteso: un menu, non un
+   pannello di spiegazioni. Dentro ci stanno le opzioni del semplice — oggi
+   quanto tempo si vede e la via all'avanzato — e il posto per quelle che
+   verranno, che è il motivo per cui è un menu e non due pulsanti.
+
+   Ancorato a destra e largo quanto basta: il pannellino della `i` era largo
+   mezzo schermo e su 390 px usciva oltre il bordo sinistro. */
+.menu { position: relative; }
+/* Senza bordo e con l'icona grande: un bordo attorno a un'icona la fa leggere
+   come un pulsante fra i pulsanti, e questo non lo è — sta in fondo alla barra
+   perché è l'ultima cosa, non perché sia la terza. Il tondo di sfondo torna solo
+   sotto il dito e quando il menu è aperto, che è quando serve sapere dov'è. */
+.menu > summary {
+  list-style: none; cursor: pointer; width: 38px; height: 38px; border-radius: 50%;
+  border: 0; color: var(--dim); display: grid; place-items: center;
+  font-size: 23px; line-height: 1;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::before { content: "\2699"; }
+.menu > summary:hover { color: var(--fg); background: #1b222c; }
+.menu[open] > summary { background: #21262d; color: var(--fg); }
+.menu-b {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
+  min-width: 236px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column; gap: 9px;
+  background: #10161d; border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; box-shadow: 0 14px 34px #000a;
+}
+.menu-r { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.menu-k { color: var(--dim); font-size: 12px; }
+/* A scatti e non una casella numerica: i valori che servono cantando sono
+   quattro, e in mezzo a una canzone non si compila un campo. */
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button {
+  border: 0; border-radius: 0; background: none; color: var(--dim);
+  padding: 5px 9px; font-size: 12px; white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:hover:not(:disabled) { background: #1b222c; color: var(--fg); border: 0; border-left: 1px solid var(--line); }
+.seg button:first-child:hover:not(:disabled) { border-left: 0; }
+.seg button[aria-pressed=true] { background: #1f6feb; color: #fff; }
+/* La via all'avanzato: una riga piena in fondo al menu, separata da quello che
+   sta sopra — cambia schermata, non è un'opzione della schermata. */
+.modo.mi {
+  width: 100%; text-align: left; background: none; border: 0; color: var(--dim);
+  border-top: 1px solid var(--line); border-radius: 0; padding: 9px 2px 2px;
+}
+.modo.mi:hover:not(:disabled) { background: none; color: var(--fg); }
+
+
+/* ============================== lo stato vuoto ============================== */
+.vuoto {
+  flex-direction: column; align-items: center; justify-content: center; gap: 13px;
+  text-align: center; padding: 46px 20px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+}
+.vuoto .marca { margin: 0; color: var(--dim); font-size: 12px; letter-spacing: .22em; text-transform: uppercase; font-weight: 600; }
+.vuoto h2 { font-size: clamp(18px, 4.4vw, 24px); margin: 0; font-weight: 600; }
+.vuoto p { margin: 0; color: var(--dim); max-width: 44ch; }
+.big { background: #1f6feb; border-color: #1f6feb; color: #fff; font-weight: 600; }
+.big:hover:not(:disabled) { background: #388bfd; border-color: #388bfd; }
+
+/* ============================== il riquadro ==============================
+   Il colore non è mai solo: dentro c'è la parola — che dice il significato, non
+   il colore — e il numero. Sotto, un indicatore che oscilla avanti e indietro
+   sulla scala delle tre zone: nel riquadro dal vivo vanno cose dal vivo, e il
+   riassunto (tempo per zona, media, mediana) sta nella scheda della presa. */
+.sem { padding: 13px 16px 15px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+.sem-top { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; }
+/* `flex: 1 1 8ch` e non la larghezza del testo: con la base a contenuto, su
+   390 px bastavano due cifre in più nel numero per mandare la NOTA a capo — e
+   una nota su una riga sua, sotto, è la riga vuota che si stava togliendo.
+   Così a cedere è la parola, che va a capo per conto suo ed è fatta per farlo. */
+.sem-say { flex: 1 1 8ch; font-size: clamp(19px, 4.4vw, 29px); font-weight: 600; line-height: 1.15; letter-spacing: -.01em; min-width: 0; }
+.sem-val { margin-left: auto; text-align: right; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-weight: 500; font-size: clamp(38px, 10vw, 68px); line-height: .9; }
+/* **La larghezza della nota è fissa, in `ch`.** I nomi vanno da due a tre
+   caratteri e la nota manca a ogni respiro: lasciandola misurare dal testo, il
+   riquadro si allargava e si stringeva in continuazione — «continua a cambiare
+   dimensione orizzontalmente e non è bello». Tre caratteri di monospazio sono
+   il caso peggiore, quindi il posto è sempre quello e dentro non si muove
+   niente. */
+.sem-nota {
+  font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-weight: 500;
+  font-size: clamp(26px, 6vw, 42px); line-height: .9; padding-left: 18px;
+  border-left: 1px solid var(--line); white-space: nowrap;
+  min-width: calc(3ch + 18px); text-align: center;
+}
+/* Nelle pause il posto resta e il segno sparisce: `visibility`, non `display`. */
+.sem-nota.vuota > span { visibility: hidden; }
+.sem[data-z=verde]  { background: linear-gradient(180deg, #12251a, var(--panel) 72%); border-color: #215230; }
+.sem[data-z=verde]  .sem-say, .sem[data-z=verde]  .sem-val { color: var(--ok); }
+.sem[data-z=giallo] { background: linear-gradient(180deg, #261f0e, var(--panel) 72%); border-color: #5c4516; }
+.sem[data-z=giallo] .sem-say, .sem[data-z=giallo] .sem-val { color: var(--warn); }
+.sem[data-z=rosso]  { background: linear-gradient(180deg, #2a1413, var(--panel) 72%); border-color: #66302b; }
+.sem[data-z=rosso]  .sem-say, .sem[data-z=rosso]  .sem-val { color: var(--bad); }
+/* Finché la misura non c'è, il riquadro non finge: al posto del numero c'è il
+   conto alla rovescia, e l'indicatore resta al suo posto ma vuoto —
+   `visibility` e non `display`, perché una scheda che cambia altezza ogni volta
+   che la misura va e viene è peggio di uno spazio vuoto. */
+.sem[data-z=""] .meter { visibility: hidden; }
+.sem[data-z=""] .sem-val { font-size: clamp(26px, 6vw, 40px); color: var(--dim); }
+
+.meter { margin-top: 14px; position: relative; height: 14px; }
+.meter-t {
+  position: absolute; inset: 2px 0 auto; height: 10px; border-radius: 999px; overflow: hidden;
+  background: linear-gradient(90deg, #3fb95055 0 33.3%, #d2992255 33.3% 61.1%, #f8514955 61.1% 100%);
+}
+.meter-now {
+  position: absolute; top: 0; width: 4px; height: 14px; border-radius: 2px; background: var(--fg);
+  transform: translateX(-2px); box-shadow: 0 0 0 3px #0e1116aa; transition: left .3s ease;
+}
+.sem[data-z=verde]  .meter-now { background: var(--ok); }
+.sem[data-z=giallo] .meter-now { background: var(--warn); }
+.sem[data-z=rosso]  .meter-now { background: var(--bad); }
+
+/* ============================== la scheda della presa ============================== */
+.presa-h { align-items: center; gap: 9px; flex-wrap: wrap; padding: 11px 13px; }
+.presa-h h3 { font-size: 15px; margin: 0; font-weight: 600; }
+.presa-meta { color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+.badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid; }
+.badge.no { color: var(--warn); border-color: #5c4516; background: #261f0e; }
+.badge.si { color: var(--ok); border-color: #215230; background: #12251a; }
+.presa-h .sp, .nav .sp { margin-left: auto; display: flex; gap: 8px; }
+.riass { flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 13px 10px; }
+.zone-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: #0d1117; flex: 1 1 160px; min-width: 110px; }
+.zone-leg { display: flex; flex-wrap: wrap; gap: 3px 13px; font-size: 11.5px; color: var(--dim); }
+.zone-leg span { display: inline-flex; align-items: center; gap: 6px; }
+.zone-leg b { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 500; }
+.zone-leg i { width: 8px; height: 8px; border-radius: 2px; }
+.nav { align-items: center; gap: 9px; flex-wrap: wrap; padding: 9px 13px; border-top: 1px solid var(--line); }
+.nav .qui { font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--dim); }
+.nav .qui b { color: var(--fg); font-weight: 600; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .recdot, .rec-time { animation: puls 1.6s ease-in-out infinite; }
+}
+@keyframes puls { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sw, .sw::after, .rack, .meter-now { transition: none; } }
+
+/* ---------- schermo stretto ----------
+   La griglia è esplicita perché con un flex che va a capo da solo il pulsante
+   «i» finiva sopra «Registra», e poi su una terza riga tutta sua. Due
+   interruttori e la i sulla prima riga, il comando di fase sulla seconda a
+   tutta larghezza: così non va a capo per caso. */
+@media (max-width: 620px) {
+  /* `auto auto 1fr` e non `1fr 1fr auto`: con due colonne elastiche il microfono
+     veniva spinto in mezzo allo schermo, lontano dal sensore, e i due
+     interruttori non si leggevano più come una coppia. Così stanno a sinistra
+     attaccati, e a cedere è lo spazio prima della rotellina. */
+  body[data-modo=semplice] .rack { display: grid; grid-template-columns: auto auto 1fr; gap: 7px 10px; padding: 8px 9px; }
+  #swSens { grid-column: 1; grid-row: 1; }
+  #swMic { grid-column: 2; grid-row: 1; }
+  .rack-min { grid-column: 3; grid-row: 1; justify-self: end; }
+  .rack-sp { display: none; }
+  .fase { grid-column: 1 / -1; grid-row: 2; }
+  .fase .rec-btn, .fase .torna { flex: 1 1 auto; justify-content: center; }
+  .scelta, .conferma, .rkerr { grid-column: 1 / -1; }
+  .sem { padding: 11px 13px 13px; }
+  /* Su 390 px il numero, la parola e la nota ci stanno per una decina di pixel:
+     senza stringere il passo e la nota, la nota andava a capo da sola e lasciava
+     una riga vuota sotto al numero — cioè lo spazio che si voleva togliere. */
+  .sem-top { gap: 8px 10px; }
+  .sem-nota { padding-left: 0; border-left: 0; min-width: 3ch; font-size: clamp(22px, 5.2vw, 34px); }
+  .presa-h .sp { width: 100%; margin-left: 0; }
+  /* Le altezze non stanno più qui: i due pannelli si dividono quello che avanza
+     nel viewport (vedi «i grafici prendono l'altezza che c'è»), e su un telefono
+     quello che avanza è quasi tutto — la barra e il grip non ci sono. Resta la
+     striscia dei momenti, che è alta 74 px per costruzione e non è un grafico. */
+  body[data-modo=semplice] #pMarks .body { height: 82px; }
+}
+
+/* ============================== le misure, in tre famiglie ==============================
+   Ventisei tessere tutte uguali in fila non si leggono: la domanda che uno si fa
+   è di una famiglia per volta — "il collegamento tiene", "il microfono sente",
+   "cosa sta misurando" — e la risposta stava sparsa fra le altre due. Tre
+   riquadri con un titolo, che è l'unica cosa che serviva. Solo in avanzato: nel
+   semplice il blocco intero non c'è. */
+#stats { display: block; background: none; border: 0; border-radius: 0; overflow: visible; }
+.stat-g { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.stat-g + .stat-g { margin-top: 8px; }
+.stat-h { color: var(--dim); font-size: 10px; letter-spacing: .13em; text-transform: uppercase; font-weight: 600; margin-bottom: 9px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 10px 14px; }
+.stat { background: none; padding: 0; }
+@media (max-width: 720px), (max-height: 560px) {
+  .stat-grid { grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); }
+}
+
+/* Il cassetto delle impostazioni è una riga sua anche su desktop. Prima era
+   `display: contents`, cioè i suoi undici controlli si mescolavano ai pulsanti
+   di collegamento e andavano a capo dove capitava: con i quattro nomi di
+   famiglia (vista / taratura / video / strumenti) quel comportamento si vede
+   subito per quello che è — un'etichetta in fondo a una riga e il suo gruppo
+   sulla successiva. `order: 2` la manda dopo lo stato, che resta in cima.
+   La condizione è il complemento esatto della media query dei cassetti: dove il
+   ⚙ esiste, questa riga si nasconde e comanda quella. */
+@media (min-width: 721px) and (min-height: 561px) {
+  header .hrow.cfg {
+    display: flex; flex: 0 0 100%; flex-wrap: wrap; align-items: center;
+    gap: 8px 10px; order: 2; padding-top: 2px; border-top: 1px solid var(--line);
+  }
+  header .hrow.cfg > .sep:first-child { display: none; }
 }

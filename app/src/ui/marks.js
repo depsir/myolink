@@ -30,6 +30,7 @@ import { TP, playFrom, playPos, stopPlay } from "../audio/tape.js";
 import { pThr } from "../draw/pitch.js";
 import { PAD, dpr } from "../draw/canvas.js";
 import { R, saveBlob } from "../record/recorder.js";
+import { semplice } from "./modo.js";
 import { calEndT } from "./calib.js";
 import { marksJson, marksVtt, stampName } from "../record/export.js";
 import { $, log } from "./dom.js";
@@ -45,6 +46,8 @@ const MK = {
   cursor: null,                    // tempo di revisione, o null = dal vivo
   range: null,                     // { t0, t1, rec } intervallo analizzato
   env: null,                       // inviluppo e nastro delle zone per la striscia
+  ts: null,                        // i tempi dei campioni analizzati, allineati ad `an.fatica`
+  p: null,                         // le stime di pitch dell'intervallo, per la nota sotto il cursore
   scelte: new Map(),               // chiave → "keep" | "drop": la curatela
 };
 
@@ -63,17 +66,27 @@ export const restBase = () => MK.an?.rest?.base ?? NaN;
 // riproduzione a deciderlo, e i pannelli scorrono con l'audio senza nessun timer
 // in più: `timeAxis()` chiama già questa a ogni fotogramma.
 export const reviewT = () => (TP.playing ? playPos() : MK.cursor);
+// Se la presa che si sta guardando ha un pitch. Serve al riquadro per decidere
+// se il posto della nota va TENUTO anche nelle pause: la nota manca a ogni
+// respiro, e un riquadro che si stringe a ogni respiro è illeggibile.
+export const hasPitch = () => !!MK.p?.ts.length;
 
 export function setupMarks() {
   legenda();
-  $("btnMarks").onclick = run;
+  $("btnMarks").onclick = analizza;
   $("mkLive").onclick = () => goto(null);
   $("mkPlay").onclick = toggleListen;
+  // La navigazione del modo semplice: gli stessi tre comandi della lista, tirati
+  // fuori e messi in fila. Non c'è niente di nuovo sotto — `step` e
+  // `toggleListen` sono quelli di sempre — ed è il punto: la 7e non ha dovuto
+  // scrivere un riascolto, solo dargli una faccia.
+  $("nvPlay").onclick = toggleListen;
+  $("nvPrev").onclick = () => step(-1);
+  $("nvNext").onclick = () => step(1);
   $("btnMkVtt").onclick = saveVtt;
   $("btnMkJson").onclick = saveJson;
-  const cv = $("strip");
-  cv.onclick = onStripClick;
-  new ResizeObserver(() => drawStrip(null)).observe(cv);
+  trascina($("strip"));
+  new ResizeObserver(() => drawStrip(null)).observe($("strip"));
   // n/p: dal vivo, con le mani occupate, è l'unica interazione che serve davvero.
   // Non quando si sta scrivendo in un campo, o "n" sparirebbe dentro un numero.
   document.addEventListener("keydown", (e) => {
@@ -107,7 +120,7 @@ function legenda() {
 
 // ---- l'analisi ----
 
-function run() {
+export function analizza() {
   const r = rangeToAnalyze();
   if (!r) return info("nessun campione da analizzare: registra o collega il sensore.");
   const seg = sliceRing(store, r.t0, r.t1);
@@ -121,6 +134,7 @@ function run() {
     cal: CAL.ready ? CAL : null,
   });
   MK.an = an; MK.range = r;
+  MK.ts = seg.ts; MK.p = p.ts.length ? p : null;
   MK.env = envelope(seg.ts, seg.vs, an.fatica, r);
   $("pMarks").hidden = false;
   report(an, r, seg.vs.length);
@@ -163,17 +177,34 @@ function slicePitch(ring, tFrom, tTo) {
 // mediana lo cancellerebbe proprio dove il nastro serve.
 function envelope(ts, vs, fatica, r) {
   const lo = new Float32Array(COLS).fill(NaN), hi = new Float32Array(COLS).fill(NaN);
+  // Il profilo della FATICA per colonna, accanto all'inviluppo dei count grezzi:
+  // nel modo semplice la striscia disegna questo. L'inviluppo dei grezzi è una
+  // mappa da riconoscere — utile a chi sa cos'è un count — ma a chi canta non
+  // dice niente, mentre il profilo della fatica è la stessa grandezza del
+  // riquadro e dei grafici, srotolata su tutta la presa. Il massimo e non la
+  // mediana, per la stessa ragione del nastro: un secondo di rosso in tre minuti
+  // occupa mezza colonna, e una mediana lo cancellerebbe dove serve.
+  const fat = new Float32Array(COLS).fill(NaN);
   const zon = new Array(COLS).fill(null);
   const rank = { verde: 1, giallo: 2, rosso: 3 };
   const span = Math.max(1e-6, r.t1 - r.t0);
+  const col = (t) => Math.min(COLS - 1, Math.max(0, Math.floor(((t - r.t0) / span) * COLS)));
   for (let i = 0; i < vs.length; i++) {
-    const c = Math.min(COLS - 1, Math.max(0, Math.floor(((ts[i] - r.t0) / span) * COLS)));
+    const c = col(ts[i]);
     if (!(vs[i] >= lo[c])) lo[c] = vs[i];
     if (!(vs[i] <= hi[c])) hi[c] = vs[i];
-    const z = zona(fatica?.[i]);
-    if (z && (!zon[c] || rank[z] > rank[zon[c]])) zon[c] = z;
+    // La fatica e la sua zona vanno alla colonna del CENTRO della finestra, come
+    // i tratti in `tratti()` e come la linea colorata nel grafico: il valore a
+    // `t` descrive [t-2s, t]. Messe a `t` cadrebbero un secondo dopo il punto che
+    // descrivono, cioè il nastro delle zone risulterebbe spostato rispetto alle
+    // tacche dei momenti disegnate sopra di lui — sulla stessa striscia.
+    const cf = col(ts[i] - WIN / 2);
+    const f = fatica?.[i];
+    if (isFinite(f) && !(fat[cf] >= f)) fat[cf] = f;
+    const z = zona(f);
+    if (z && (!zon[cf] || rank[z] > rank[zon[cf]])) zon[cf] = z;
   }
-  return { lo, hi, zon };
+  return { lo, hi, fat, zon };
 }
 
 // Il referto: nel log, che è la storia della sessione. Dice quattro cose che
@@ -252,7 +283,155 @@ function render() {
   $("mkPlay").title = nastro
     ? "riascolta dal cursore in avanti (barra spaziatrice); i tre pannelli scorrono con l'audio"
     : "il nastro dell'audio gira solo col microfono aperto";
+  riassunto();
+  navigazione(nastro);
 }
+
+// ---- il riassunto della presa ----
+//
+// `tempiInZona()` esisteva da prima e non era mostrata a nessuno: finiva solo in
+// una riga di log e nel .json. È la riga che distingue una presa buona da una
+// sbagliata più di qualunque elenco di momenti — sui samples, 0 s di rosso nella
+// presa "ok" contro 5,4 s in quella con l'errore — e le bastava una barra.
+function riassunto() {
+  const bar = $("zbar"), leg = $("zleg");
+  if (!bar || !leg) return;
+  const t = MK.an?.tempi;
+  bar.textContent = ""; leg.textContent = "";
+  const tot = t ? t.verde + t.giallo + t.rosso + t.muto : 0;
+  // Senza analisi la barra non è vuota: non c'è. Una pillola grigia senza niente
+  // dentro si legge come "tutto a zero", che è un'altra cosa da "non misurato".
+  const box = bar.parentElement;
+  box.hidden = !(tot > 0);
+  if (!(tot > 0)) return;
+  for (const z of ZONE) {
+    const i = document.createElement("i");
+    i.style.width = (100 * t[z.key] / tot).toFixed(2) + "%";
+    i.style.background = z.col;
+    bar.appendChild(i);
+    // Il numero accanto al colore, e non solo la proporzione: "5,4 s di rosso" è
+    // confrontabile fra due prese, "il 7%" no — dipende da quanto è lunga.
+    const s = document.createElement("span");
+    const q = document.createElement("i");
+    q.style.background = z.col;
+    const b = document.createElement("b");
+    b.textContent = secs(t[z.key]);
+    s.title = z.help;
+    s.append(q, b);
+    leg.appendChild(s);
+  }
+}
+
+const secs = (s) => (s >= 60 ? mmss(s) : s.toFixed(1).replace(".", ",") + " s");
+
+// ---- la navigazione ----
+//
+// Dove sei, e i due passi. Nel modo semplice prende il posto della lista: venti
+// righe da scorrere rispondono a "quali sono", questa risponde a "portami lì".
+function navigazione(nastro) {
+  dove();
+  const i = MK.list.findIndex((m) => markKey(m) === MK.sel);
+  // Ai due estremi il passo non c'è: un pulsante che non fa niente insegna a non
+  // fidarsi degli altri.
+  $("nvPrev").disabled = !MK.list.length || i === 0;
+  $("nvNext").disabled = !MK.list.length || (i >= 0 && i === MK.list.length - 1);
+  $("nvPlay").disabled = !nastro;
+  $("nvPlay").textContent = TP.playing ? "■ Ferma" : "▶ Ascolta";
+  $("nvPlay").title = nastro
+    ? "riascolta dal punto in cui sei (barra spaziatrice)"
+    : "si riascolta solo se il microfono era aperto: il nastro gira con lui";
+}
+
+// Dove sei dentro la presa. Due cose sono cambiate e vengono dalla stessa
+// osservazione — «c'è di fianco *sei a 0:12* ma non ha senso *sei a*, e poi
+// resta fisso e si aggiorna solo a stop»:
+//
+//  - **«sei a» non c'è più.** Un tempo accanto a una barra di navigazione è
+//    già la posizione; la preposizione era l'etichetta ridondante che tutta la
+//    fase 7 toglie. Al suo posto il totale, che è l'unica cosa che mancava per
+//    dare una misura al numero: `0:12 di 1:45`.
+//  - **Si muove.** Era scritto solo da `render()`, cioè a ogni scelta
+//    dell'utente, e la riproduzione non ne fa nessuna: il cursore correva sulla
+//    striscia (quella la ridisegna il ciclo di disegno) e il numero restava
+//    fermo sull'istante in cui si era premuto play. Adesso lo riscrive anche il
+//    ciclo, a 5 Hz, che è la cadenza del riquadro e delle statistiche.
+export function dove() {
+  const qui = $("nvQui");
+  if (!qui) return;
+  const i = MK.list.findIndex((m) => markKey(m) === MK.sel);
+  const t = reviewT();
+  qui.textContent = "";
+  if (t !== null && MK.range) {
+    qui.append(forte(mmss(t - MK.range.t0)), " di " + mmss(MK.range.t1 - MK.range.t0));
+    if (i >= 0) qui.append(" · momento ", forte(`${i + 1} di ${MK.list.length}`));
+  } else if (MK.range && !MK.list.length) {
+    qui.append("nessun momento fuori dal verde");
+  }
+}
+
+function forte(txt) {
+  const b = document.createElement("b");
+  b.textContent = txt;
+  return b;
+}
+
+// ---- la lettura sotto il cursore ----
+//
+// Serve al riquadro, che in fase «la presa» deve dire il valore del punto che i
+// grafici stanno mostrando e non l'ultimo arrivato dal sensore. Il valore a `t`
+// descrive [t-2s, t] e si attribuisce al centro, quindi il campione da cercare è
+// quello a `t + WIN/2`: la stessa convenzione di `tratti()`, del nastro e della
+// linea colorata: se uno solo dei quattro usasse l'altra, il riquadro e il
+// grafico direbbero due numeri diversi sullo stesso istante.
+export function cursore() {
+  const t = reviewT();
+  if (t === null || !MK.an || !MK.ts?.length || !MK.range) return null;
+  const i = vicino(MK.ts, t + WIN / 2);
+  const val = MK.an.fatica[i];
+  if (!isFinite(val)) return null;
+  return { t, rel: t - MK.range.t0, val, zona: zona(val), m: notaA(t) };
+}
+
+// La nota sotto il cursore: la stima più vicina, se è abbastanza vicina e
+// abbastanza pulita. Fuori tolleranza non si inventa la nota di mezzo secondo
+// prima — in quel mezzo secondo può esserci una pausa.
+const NOTA_TOL = 0.12;
+function notaA(t) {
+  const p = MK.p;
+  if (!p?.ts.length) return NaN;
+  const i = vicino(p.ts, t);
+  if (Math.abs(p.ts[i] - t) > NOTA_TOL) return NaN;
+  return p.c[i] >= (MK.an?.thr ?? 0.8) ? p.m[i] : NaN;
+}
+
+// L'indice del campione più vicino a `t`. Ricerca binaria: su una presa di tre
+// minuti a 1 kHz sono 180.000 campioni, e questa gira a ogni fotogramma.
+function vicino(ts, t) {
+  let lo = 0, hi = ts.length - 1;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (ts[m] < t) lo = m + 1; else hi = m;
+  }
+  if (lo > 0 && Math.abs(ts[lo - 1] - t) <= Math.abs(ts[lo] - t)) return lo - 1;
+  return lo;
+}
+
+// ---- entrare e uscire dalla revisione ----
+
+// Dove ci si mette appena finita una registrazione: sul primo momento se c'è, e
+// se no all'inizio della presa. Non "dal vivo": entrare nella fase e continuare
+// a vedere scorrere i grafici sarebbe la contraddizione da cui è nata la 7e.
+export function vaiPrimo() {
+  if (MK.list.length) return goto(MK.list[0]);
+  MK.sel = null;
+  // `render()` anche senza intervallo: è quello che spegne i due passi e la
+  // barra delle zone. Uscendo di qui senza disegnare, la scheda di una presa
+  // senza analisi terrebbe i comandi dell'analisi precedente — accesi.
+  MK.cursor = MK.range ? MK.range.t0 : null;
+  render();
+}
+
+export const alVivo = () => goto(null);
 
 const info = (t) => { $("mkInfo").textContent = t; };
 
@@ -309,12 +488,65 @@ function step(d) {
   goto(MK.list[next]);
 }
 
-function onStripClick(e) {
-  if (!MK.range) return;
+// Il tempo sotto il puntatore, in tempo del grafico.
+function tAt(clientX) {
   const cv = $("strip"), b = cv.getBoundingClientRect();
   const gw = Math.max(1, b.width - PAD.l - PAD.r);
-  const f = (e.clientX - b.left - PAD.l) / gw;
-  const t = MK.range.t0 + Math.max(0, Math.min(1, f)) * (MK.range.t1 - MK.range.t0);
+  const f = (clientX - b.left - PAD.l) / gw;
+  return { t: MK.range.t0 + Math.max(0, Math.min(1, f)) * (MK.range.t1 - MK.range.t0), gw };
+}
+
+// ---- trascinare la striscia ----
+//
+// Era solo un clic, e su una presa di tre minuti cercare un punto voleva dire
+// dieci clic e dieci ridisegni: «la window dovrebbe essere draggabile, non solo
+// clic e si sposta a quel momento». Trascinando, i tre pannelli scorrono sotto
+// il dito — il cursore È già l'asse dei tempi di tutti, quindi non c'è niente da
+// sincronizzare, basta scriverlo.
+//
+// Il clic resta e resta DIVERSO: senza spostamento si aggancia al momento più
+// vicino (che è come si salta da un punto caldo all'altro), trascinando no —
+// agganciarsi mentre si scorre farebbe saltare la vista addosso ai momenti.
+// I tre pixel di soglia sono quello che distingue un tocco da un trascinamento
+// sul vetro di un telefono, dove un dito fermo non è mai fermo davvero.
+const SOGLIA_PX = 3;
+let trascino = null;
+
+function trascina(cv) {
+  cv.addEventListener("pointerdown", (e) => {
+    if (!MK.range) return;
+    // Trascinare mentre suona: la riproduzione andrebbe a combattere col dito
+    // per il possesso del cursore, e vincerebbe lei.
+    if (TP.playing) { const pos = stopPlay(); if (pos != null) MK.cursor = pos; render(); }
+    cv.setPointerCapture(e.pointerId);
+    trascino = { id: e.pointerId, x0: e.clientX, mosso: false };
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!trascino || e.pointerId !== trascino.id) return;
+    if (!trascino.mosso && Math.abs(e.clientX - trascino.x0) < SOGLIA_PX) return;
+    trascino.mosso = true;
+    MK.sel = null;
+    MK.cursor = tAt(e.clientX).t;
+    // `dove()` e non `render()`: a ogni pixel di trascinamento ricostruire la
+    // lista dei momenti sarebbe qualche centinaio di nodi al secondo buttati
+    // via. La striscia e i tre pannelli li ridisegna il ciclo, che legge
+    // `MK.cursor` da sé.
+    dove();
+  });
+  const su = (e) => {
+    if (!trascino || e.pointerId !== trascino.id) return;
+    const mosso = trascino.mosso;
+    trascino = null;
+    try { cv.releasePointerCapture(e.pointerId); } catch {}
+    if (mosso) render(); else onStripClick(e);
+  };
+  cv.addEventListener("pointerup", su);
+  cv.addEventListener("pointercancel", su);
+}
+
+function onStripClick(e) {
+  if (!MK.range) return;
+  const { t, gw } = tAt(e.clientX);
   // Il punto più vicino, se è vicino: altrimenti si guarda semplicemente lì —
   // la striscia è anche la barra di navigazione della registrazione.
   const tol = (HIT_PX / gw) * (MK.range.t1 - MK.range.t0);
@@ -342,6 +574,9 @@ export function drawStrip(ax) {
     if (now - lastPlayInfo > 200) {
       lastPlayInfo = now;
       info(`▶ ${mmss(playPos() - MK.range.t0)} di ${mmss(MK.range.t1 - MK.range.t0)}`);
+      // La riga della navigazione insieme alla sua gemella in avanzato: era
+      // l'unica cosa a schermo che durante il riascolto restava ferma.
+      dove();
     }
   }
   sctx = sctx || cv.getContext("2d");
@@ -356,7 +591,9 @@ export function drawStrip(ax) {
   if (!MK.range) {
     cx.fillStyle = "#6e7681"; cx.font = "11px ui-monospace, monospace";
     cx.textAlign = "center"; cx.textBaseline = "middle";
-    cx.fillText("premi “Momenti” per cercare i punti caldi in quello che hai registrato", w / 2, h / 2);
+    cx.fillText(semplice()
+      ? "nessun dato del sensore in questa presa: c'è solo l'audio."
+      : "premi “Momenti” per cercare i punti caldi in quello che hai registrato", w / 2, h / 2);
     return;
   }
 
@@ -368,7 +605,16 @@ export function drawStrip(ax) {
   // L'inviluppo: min/max per colonna, in scala sul proprio massimo. Non è un
   // grafico da leggere, è una mappa da riconoscere — serve a dare al punto un
   // "dove" dentro il brano.
-  const { lo, hi, zon } = MK.env;
+  const { lo, hi, fat, zon } = MK.env;
+
+  // Nel modo semplice la striscia disegna il PROFILO DELLA FATICA sulla sua
+  // scala (0…+90 sopra il riposo), non l'inviluppo dei count grezzi: è la stessa
+  // grandezza del riquadro e dei grafici, srotolata su tutta la presa, e sopra
+  // ci cadono le due righe dei confini. L'inviluppo dei grezzi resta in
+  // avanzato, dove è quello che serve — riconoscere la forma di una prova.
+  if (semplice()) {
+    profiloFatica(cx, fat, PAD.l, gw, eh);
+  } else {
   let vLo = Infinity, vHi = -Infinity;
   for (let c = 0; c < COLS; c++) {
     if (isFinite(lo[c])) vLo = Math.min(vLo, lo[c]);
@@ -393,6 +639,7 @@ export function drawStrip(ax) {
     cx.strokeStyle = "#2f3846"; cx.setLineDash([3, 3]); cx.lineWidth = 1;
     cx.beginPath(); cx.moveTo(PAD.l, y); cx.lineTo(PAD.l + gw, y); cx.stroke();
     cx.setLineDash([]);
+  }
   }
 
   // La finestra che i tre pannelli stanno mostrando: senza, cliccare sulla
@@ -463,6 +710,53 @@ export function drawStrip(ax) {
   }
   cx.textAlign = "right";
   cx.fillText(mmss(span), PAD.l + gw, h - 1);
+}
+
+// Il profilo della fatica sulla striscia, sulla scala delle zone: la stessa
+// 0…+90 del riquadro, così un picco alto lì è alto anche qui. Area e linea, più
+// le due righe dei confini — che è tutto quello che serve per leggere «è stata
+// una presa tranquilla con due punte» senza contare niente.
+const STRIP_MAX = 90;
+function profiloFatica(cx, fat, x0, gw, eh) {
+  const Y = (v) => 2 + eh - (Math.min(STRIP_MAX, Math.max(0, v)) / STRIP_MAX) * eh;
+  // Una colonna per pixel: `fat` ne ha 1024, lo schermo qualche centinaio.
+  const col = new Array(gw).fill(NaN);
+  for (let px = 0; px < gw; px++) {
+    const c0 = Math.floor((px / gw) * COLS), c1 = Math.max(c0 + 1, Math.floor(((px + 1) / gw) * COLS));
+    let v = NaN;
+    for (let c = c0; c < c1 && c < COLS; c++) if (isFinite(fat[c]) && !(v >= fat[c])) v = fat[c];
+    col[px] = v;
+  }
+  cx.beginPath();
+  cx.moveTo(x0, 2 + eh);
+  for (let px = 0; px < gw; px++) if (isFinite(col[px])) cx.lineTo(x0 + px, Y(col[px]));
+  cx.lineTo(x0 + gw, 2 + eh);
+  cx.closePath();
+  // Grigio e non azzurro: l'azzurro su questa striscia è già la finestra che i
+  // pannelli stanno mostrando, e due azzurri quasi uguali sovrapposti non si
+  // distinguono.
+  cx.fillStyle = "#8b949e18"; cx.fill();
+
+  // I confini PRIMA della linea: sono la scala, e la linea deve restare sopra.
+  cx.save();
+  cx.setLineDash([3, 4]); cx.lineWidth = 1;
+  for (const [v, col2] of [[VERDE, Z.giallo.col], [ROSSO, Z.rosso.col]]) {
+    const y = Math.round(Y(v)) + .5;
+    cx.strokeStyle = col2 + "66";
+    cx.beginPath(); cx.moveTo(x0, y); cx.lineTo(x0 + gw, y); cx.stroke();
+  }
+  cx.restore();
+
+  cx.strokeStyle = "#8b949e"; cx.lineWidth = 1.3; cx.lineJoin = "round";
+  cx.beginPath();
+  let pen = false;
+  for (let px = 0; px < gw; px++) {
+    if (!isFinite(col[px])) { pen = false; continue; }
+    const y = Y(col[px]);
+    if (pen) cx.lineTo(x0 + px, y); else cx.moveTo(x0 + px, y);
+    pen = true;
+  }
+  cx.stroke();
 }
 
 // ---- quello che esce ----

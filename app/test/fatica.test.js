@@ -127,7 +127,7 @@ describe("lo zero, senza chiedere niente a nessuno", () => {
   });
 
   it("con poca storia non risponde: sarebbe la frase più piana", () => {
-    const { ts, vs } = traccia([], { secs: ZERO_MIN - 5 });
+    const { ts, vs } = traccia([], { secs: ZERO_MIN - 2 });
     expect(isFinite(zeroVivo(ring(ts, vs)))).toBe(false);
   });
 

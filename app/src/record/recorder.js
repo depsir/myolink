@@ -48,6 +48,11 @@ export const R = {
   // Il file finito, TENUTO invece di scaricato da sé. Lo scarica il pulsante
   // "Salva video + CSV", e alla fase 5c è da qui che il replay prenderà il video.
   blob: null, name: "", secs: 0,
+  // Se è finita sul disco oppure no. Il download avveniva e nessuno se ne
+  // ricordava: "le ho scaricate o no?" era una delle cinque domande a cui la
+  // fase 7 doveva rispondere, e senza questo flag non è rispondibile — né dal
+  // distintivo sulla scheda della presa, né dalla domanda prima di buttarla.
+  saved: false,
   // I dati della registrazione, congelati allo stop: `[{ name, blob, n, cosa }]`.
   // Sono ciò che l'utente si aspetta trovando un pulsante "salva" dopo aver
   // registrato — il video mostra la prova, questi la rendono rianalizzabile — e
@@ -82,9 +87,13 @@ export async function toggleRecord() {
   // La registrazione precedente sta in RAM e non ce ne stanno due: se non è stata
   // salvata, lo si dice invece di buttarla in silenzio.
   if (R.blob) {
+    // Se era già stata salvata non è una perdita: il file è sul disco, e dirlo
+    // con le stesse parole di quando invece si perde davvero qualcosa
+    // insegnerebbe a non leggere l'avviso.
     log(`registrazione precedente (${dur(R.secs)}, ${fileSize(R.blob.size)}` +
-        `${R.data.length ? " + CSV" : ""}) buttata: non era stata salvata.`);
-    R.blob = null; R.name = ""; R.data = []; showSave();
+        `${R.data.length ? " + CSV" : ""}) ` +
+        (R.saved ? "tolta dalla memoria: era già salvata." : "buttata: non era stata salvata."));
+    dimentica();
   }
 
   const out = document.createElement("canvas");
@@ -247,7 +256,7 @@ function save() {
   // un file nei download prima di aver guardato com'è venuto è la cosa che
   // sembrava strana a chi lo usa — e a ragione, perché fra Stop e "lo tengo" in
   // mezzo c'è il riascolto. Il file resta in memoria e lo scarica un pulsante.
-  R.blob = blob; R.name = name; R.data = data; R.secs = secs;
+  R.blob = blob; R.name = name; R.data = data; R.secs = secs; R.saved = false;
   showSave();
   // Il bitrate MEDIO effettivo, che è l'unico numero che dice se il tetto chiesto
   // all'avvio è servito o è rimasto lì: con pannelli quasi fermi il file esce a
@@ -317,11 +326,39 @@ export function saveRecording() {
   if (!R.blob) return log("nessuna registrazione in memoria.");
   saveBlob(R.blob, R.name);
   for (const f of R.data) saveBlob(f.blob, f.name);
+  // Da qui in poi la presa è sul disco, e l'app lo sa: il distintivo sulla
+  // scheda cambia, e tornare al vivo smette di essere una domanda.
+  R.saved = true;
+  showSave();
   log(`registrazione salvata: ${R.name} — ${dur(R.secs)}, ${fileSize(R.blob.size)}` +
       R.data.map((f) => `, ${f.name} — ${f.n.toLocaleString("it")} ${f.cosa}`).join(""));
   // Il permesso per "più download" lo chiede Chrome la prima volta e la richiesta
   // non spiega perché: meglio trovarne il motivo scritto qui sotto.
   if (R.data.length) log("   → se il browser chiede il permesso per più download, sono i CSV accanto al video.");
+}
+
+// Buttare la presa, su richiesta esplicita. È l'altra metà di "Salva": senza,
+// l'unico modo di liberarsi di una registrazione venuta male era registrarne
+// un'altra sopra — cioè scoprire per tentativi che la memoria ne tiene una sola.
+//
+// Non chiede conferma qui dentro: la domanda, quando serve, la fa chi ha il
+// contesto per formularla (vedi la conferma del ritorno al vivo). Questa è la
+// via in cui l'utente ha già detto di sì.
+export function discardRecording() {
+  if (!R.blob) return false;
+  const era = `${dur(R.secs)}, ${fileSize(R.blob.size)}`;
+  const salvata = R.saved;
+  dimentica();
+  log(`presa eliminata (${era})` + (salvata ? " — il file salvato sul disco resta." : " — non era stata salvata."));
+  return true;
+}
+
+// Il pezzo comune fra "la butto io" e "la sovrascrive la prossima": dimenticare
+// una presa è una cosa sola, e scriverla due volte vorrebbe dire dimenticare un
+// campo in uno dei due punti.
+function dimentica() {
+  R.blob = null; R.name = ""; R.data = []; R.secs = 0; R.saved = false;
+  showSave();
 }
 
 // Il CSV di TUTTO quello che c'è in memoria, registrazione o no: è l'altro

@@ -4,14 +4,36 @@ import { S, store } from "../core/state.js";
 import { ACT_WIN, CAL, movMedian, norm } from "../core/calib.js";
 import { ROSSO, VERDE, WIN as WIN_F, Z, colore, faticaSerie, zona } from "../core/fatica.js";
 import { markKey, mmss } from "../core/marks.js";
-import { marks, range, restBase, selected } from "../ui/marks.js";
+import { marks, range, restBase, reviewT, selected } from "../ui/marks.js";
 import { FT } from "../ui/fatica.js";
+import { semplice, tracce } from "../ui/modo.js";
 import { ctx, cssW, cssH, PAD } from "./canvas.js";
+import { etichetteTempi, reticoloTempi } from "./tempo.js";
 import { $ } from "../ui/dom.js";
+
+// ---- la scala del modo semplice ----
+//
+// Zero = il tuo riposo, fondo scala +90 count. Il modo avanzato disegna i count
+// ASSOLUTI dell'ADC — 0…1000 di serie — e su quella scala la grandezza che conta
+// occupa l'8% dell'altezza: le due prese buone del 4 settembre stanno a +24 e
+// l'errore confermato a +68, cioè quarantaquattro count su mille. Tecnicamente
+// giusto e illeggibile.
+//
+// Il fondo scala è lo stesso dell'indicatore del riquadro, ed è il motivo per
+// cui i due si leggono insieme: un picco a metà altezza qui è l'ago a metà
+// barra lì. Sotto lo zero si tiene un po' di margine perché la linea ci va
+// davvero — il riposo è un percentile basso, non un minimo.
+const SEM_MIN = -15, SEM_MAX = 90;
 
 export function drawChart(ax) {
   const { W, tNow, tLeft } = ax;
-  const yMin = +$("ymin").value, yMax = +$("ymax").value;
+  // Lo zero della sessione serve prima di tutto il resto nel modo semplice,
+  // perché è lui a decidere la scala: senza, non c'è niente da disegnare in
+  // count sopra il riposo, e si aspetta invece di inventare uno zero.
+  const fBase = isFinite(FT.base) ? FT.base : restBase();
+  const sem = semplice() && isFinite(fBase);
+  let yMin = +$("ymin").value, yMax = +$("ymax").value;
+  if (sem) { yMin = fBase + SEM_MIN; yMax = fBase + SEM_MAX; }
   // L'inviluppo del MyoWare è filtrato in hardware e in modo causale: SEGUE il
   // muscolo. Qui la traccia si sposta indietro di quel ritardo per allinearla al
   // pitch — e solo qui: i campioni nello store, e quindi il CSV, restano dove li
@@ -22,40 +44,69 @@ export function drawChart(ax) {
   // segnale, sovrapposte, e spesso se ne guarda una sola: la nuvola dei grezzi
   // copre le altre due quando si cerca un artefatto, e la linea colorata da sola
   // è la lettura che va nel video. Il registratore copia questo canvas, quindi il
-  // video segue le caselle senza doverne sapere niente.
-  // Il default è "accesa": senza DOM il grafico resta completo.
-  const vis = (id) => $(id)?.checked ?? true;
-  const vRaw = vis("trRaw"), vMed = vis("trMed"), vFat = vis("trFat");
+  // video segue la legenda senza doverne sapere niente.
+  //
+  // Il default per modo sta in `ui/modo.js`: nel semplice la linea di serie è una
+  // sola — chi canta non sta cercando un artefatto — in avanzato ci sono tutte e
+  // tre. Il comando è la legenda sotto il grafico, che c'è in tutti e due i modi.
+  const trk = tracce();
+  const vRaw = trk.raw, vMed = trk.med, vFat = trk.fat;
 
   ctx.clearRect(0, 0, cssW, cssH);
 
   const X = (t) => PAD.l + ((t - tLeft) / W) * gw;
   const Y = (v) => PAD.t + gh - ((v - yMin) / (yMax - yMin || 1)) * gh;
+  // Nel modo semplice la scala è fissa, quindi un valore fuori scala esiste: un
+  // elettrodo che si stacca, o il simulatore. Senza limite la linea esce dal
+  // canvas e il grafico sembra VUOTO proprio quando sta succedendo qualcosa —
+  // il modo peggiore di non dire niente. Appoggiata al bordo si vede che è
+  // oltre, e quanto lo dice il numero nel riquadro. In avanzato niente limite:
+  // lì la scala la sceglie chi guarda, e tagliarla sarebbe mentire.
+  const Yc = (v) => (sem ? Math.max(PAD.t, Math.min(PAD.t + gh, Y(v))) : Y(v));
 
-  // griglia
+  // ---- la griglia ----
   ctx.strokeStyle = "#1c222c"; ctx.fillStyle = "#6e7681";
   ctx.lineWidth = 1; ctx.font = "10px ui-monospace, monospace";
   ctx.textAlign = "right"; ctx.textBaseline = "middle";
-  for (let i = 0; i <= 4; i++) {
-    const v = yMin + (yMax - yMin) * i / 4, y = Math.round(Y(v)) + .5;
-    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(cssW - PAD.r, y); ctx.stroke();
-    ctx.textAlign = "right"; ctx.fillText(v.toFixed(0), PAD.l - 6, y);
-    ctx.textAlign = "left"; ctx.fillText(v.toFixed(0), cssW - PAD.r + 6, y);
+  if (sem) {
+    // Le tre zone come FONDO, e non come quattro righe equidistanti che nella
+    // scala della fatica non vorrebbero dire niente. Campiture bassissime: sopra
+    // ci passa una linea sola, quindi il fondo può permettersi di dire dove sei
+    // senza contendersi lo spazio con nient'altro — che era invece il motivo per
+    // cui in avanzato le campiture erano state tolte.
+    for (const [a, b, col] of [[0, VERDE, Z.verde.col], [VERDE, ROSSO, Z.giallo.col], [ROSSO, SEM_MAX, Z.rosso.col]]) {
+      const y0 = Y(fBase + b), y1 = Y(fBase + a);
+      ctx.fillStyle = col + "16";
+      ctx.fillRect(PAD.l, y0, gw, y1 - y0);
+    }
+    for (const v of [0, VERDE, ROSSO, SEM_MAX]) {
+      const y = Math.round(Y(fBase + v)) + .5;
+      ctx.strokeStyle = v === 0 ? "#2f3846" : "#1c222c";
+      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(cssW - PAD.r, y); ctx.stroke();
+      ctx.fillStyle = "#6e7681"; ctx.textAlign = "right";
+      // L'etichetta in cima rientra: a `PAD.t` metà del testo sarebbe fuori dal
+      // canvas, e il fondo scala è proprio quello che si legge quando la linea
+      // ci si appoggia contro.
+      ctx.fillText(v ? "+" + v : "0", PAD.l - 6, Math.max(y, PAD.t + 6));
+    }
+  } else {
+    for (let i = 0; i <= 4; i++) {
+      const v = yMin + (yMax - yMin) * i / 4, y = Math.round(Y(v)) + .5;
+      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(cssW - PAD.r, y); ctx.stroke();
+      ctx.textAlign = "right"; ctx.fillText(v.toFixed(0), PAD.l - 6, y);
+      ctx.textAlign = "left"; ctx.fillText(v.toFixed(0), cssW - PAD.r + 6, y);
+    }
   }
-  ctx.textAlign = "center"; ctx.textBaseline = "top";
-  const step = W <= 2 ? 0.25 : W <= 6 ? 1 : W <= 20 ? 2 : 5;
-  for (let s = Math.ceil(tLeft / step) * step; s <= tNow; s += step) {
-    const x = Math.round(X(s)) + .5;
-    ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, PAD.t + gh); ctx.stroke();
-    // l'etichetta è centrata sulla tacca: vicino al bordo destro finirebbe tagliata
-    if (x < cssW - PAD.r - 16) ctx.fillText((s - tNow).toFixed(W <= 2 ? 2 : 1) + "s", x, PAD.t + gh + 5);
-  }
+  // Il reticolo e le etichette sotto stanno in `draw/tempo.js`: li disegna
+  // identici anche il pannello del pitch, che ha lo stesso asse X.
+  reticoloTempi(ctx, ax, X, PAD.t, gh);
+  etichetteTempi(ctx, ax, X, PAD.l, cssW - PAD.r, PAD.t + gh + 5);
 
   // ---- le tre zone della fatica, come fasce orizzontali ----
   //
   // Lo ZERO viene dalla sessione, non dalla calibrazione: il 5° percentile del
   // livello sugli ultimi due minuti (vedi core/fatica.js). Quando non c'è ancora
-  // — i primi venti secondi — non si disegna niente, perché una fascia gialla
+  // — i primi secondi, finché lo zero non c'è — non si disegna niente, perché una fascia gialla
   // messa nel posto sbagliato è peggio di nessuna fascia.
   //
   // Due RIGHE e non due campiture. Le campiture c'erano, e coloravano metà
@@ -65,8 +116,8 @@ export function drawChart(ax) {
   // Spente insieme alla linea della fatica: sono la scala su cui si legge LEI —
   // dove passa il confine fra le zone — e da sole, senza la linea, misurano una
   // cosa che nel grafico non c'è più.
-  const fBase = isFinite(FT.base) ? FT.base : restBase();
-  if (vFat && isFinite(fBase)) {
+  // In semplice le due righe non servono: i confini sono già il fondo.
+  if (vFat && !sem && isFinite(fBase)) {
     ctx.save();
     ctx.setLineDash([2, 4]);
     ctx.textBaseline = "bottom"; ctx.font = "10px ui-monospace, monospace";
@@ -83,7 +134,7 @@ export function drawChart(ax) {
   // Le due righe della calibrazione: dov'è il riposo e dov'è l'appoggio di
   // riferimento. Sono quello che rende il grafico leggibile senza convertire a
   // mente — la distanza fra la traccia e la riga verde È l'attivazione.
-  if (CAL.ready) {
+  if (CAL.ready && !sem) {
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.textBaseline = "bottom";
@@ -123,7 +174,9 @@ export function drawChart(ax) {
     if (on) {
       ctx.font = "10px ui-monospace, monospace";
       ctx.textAlign = "left"; ctx.textBaseline = "top";
-      ctx.fillText(`${mmss(m.t - (range()?.t0 || 0))}  ${m.zona} +${m.val.toFixed(0)}`, x0 + 3, PAD.t + 4);
+      // Nel semplice senza il nome della zona: il colore della banda lo dice già,
+      // ed è la stessa ragione per cui il riquadro non scrive «rosso».
+      ctx.fillText(`${mmss(m.t - (range()?.t0 || 0))}  ${sem ? "" : m.zona + " "}+${m.val.toFixed(0)}`, x0 + 3, PAD.t + 4);
     }
   }
 
@@ -131,6 +184,16 @@ export function drawChart(ax) {
   if (store.n > 1) {
     const from = store.firstAtOrAfter(tLeft);
     const maxGap = (S.dtUs / 1e6) * 1.8;
+    // **Tutte le tracce dentro il rettangolo del grafico.** Non è una cautela:
+    // la linea della fatica è disegnata a `t − WIN/2` (mezza finestra indietro,
+    // perché il valore descrive il passato), e l'offset EMG ne aggiunge un
+    // altro, quindi il primo campione utile cade un secondo A SINISTRA del bordo
+    // sinistro — cioè fuori dall'asse Y, sopra le etichette dei count. Tagliare
+    // il disegno è l'unico modo giusto: spostare la condizione d'ingresso
+    // taglierebbe invece la LINEA, lasciando un secondo di buco dopo l'asse.
+    ctx.save();
+    ctx.beginPath(); ctx.rect(PAD.l, PAD.t, gw, gh); ctx.clip();
+
     // I campioni grezzi passano in secondo piano: sono la nuvola attorno alla
     // linea, non la linea. Vedi il blocco qui sotto.
     if (vRaw) {
@@ -216,7 +279,7 @@ export function drawChart(ax) {
       for (let k = 0; k < ts.length; k++) {
         const z = zona(fat[k]);
         if (z === null || ts[k] < tLeft - 1e-9) { chiudi(); zPrev = null; continue; }
-        const x = X(ts[k] - eoff - WIN_F / 2), y = Y(fBase + fat[k]);
+        const x = X(ts[k] - eoff - WIN_F / 2), y = Yc(fBase + fat[k]);
         if (zPrev === null || ts[k] - pT > maxGap * 4) {
           chiudi(); ctx.strokeStyle = colore(fat[k]); ctx.beginPath(); ctx.moveTo(x, y); aperto = true;
         } else if (z !== zPrev) {
@@ -232,8 +295,14 @@ export function drawChart(ax) {
     const li = store.last(), lt = store.t[li];
     const lagMs = (tNow - lt) * 1000;
     if (S.running) S.maxLagMs = Math.max(S.maxLagMs, lagMs);
-    ctx.strokeStyle = "#30363d"; ctx.beginPath();
-    ctx.moveTo(Math.round(X(tNow)) + .5, PAD.t); ctx.lineTo(Math.round(X(tNow)) + .5, PAD.t + gh); ctx.stroke();
+    // In revisione la riga verticale sta sul PUNTO CHE SI STA GUARDANDO, non sul
+    // bordo destro della finestra: il bordo destro è l'adesso solo dal vivo, e
+    // lasciarla lì mentre si riguarda una presa indicherebbe un istante che non
+    // è quello di cui parlano il riquadro e la striscia.
+    const rv = reviewT();
+    const xc = Math.round(X(rv !== null ? rv : tNow)) + .5;
+    ctx.strokeStyle = rv !== null ? "#8b949e" : "#30363d"; ctx.beginPath();
+    ctx.moveTo(xc, PAD.t); ctx.lineTo(xc, PAD.t + gh); ctx.stroke();
     // Il pallino è il capolinea della traccia grezza, e sparisce con lei; il
     // numero qui sotto no — quello è la lettura, e si guarda anche a traccia
     // spenta. Il colore va rimesso apposta: se restasse quello lasciato
@@ -242,6 +311,11 @@ export function drawChart(ax) {
       ctx.fillStyle = "#4ea1ff";
       ctx.beginPath(); ctx.arc(X(lt - eoff), Y(store.v[li]), 2.5, 0, 7); ctx.fill();
     }
+    ctx.restore();
+    // Il count grezzo dell'ultimo campione: in semplice non compare, perché
+    // "512" senza la sua scala non è un'informazione — è un numero. Quello che
+    // conta lì è il +4 sopra il riposo, ed è già grande nel riquadro.
+    if (sem) return;
     ctx.fillStyle = "#4ea1ff";
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.font = "11px ui-monospace, monospace";

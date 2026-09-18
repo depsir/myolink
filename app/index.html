@@ -41,6 +41,11 @@
     <button id="btnStop" class="danger" disabled><span class="lg">Disconnetti</span><span class="sm">Disc.</span></button>
     <div class="sep"></div>
     <button id="btnAudio"><span class="lg">Microfono</span><span class="sm">Mic</span></button>
+    <!-- La stessa tendina del menu della rotellina, che in avanzato non c'è.
+         Qui sta accanto al pulsante che apre il microfono, cioè si legge come
+         un'opzione di quello: un comando, due posti, e a scriverli è lo stesso
+         `ui/microfoni.js`. -->
+    <span class="rigamic" hidden><select class="selmic" id="selMicAv" aria-label="microfono"></select></span>
     <div class="sep"></div>
     <button id="btnRec"><span class="lg">Registra</span><span class="sm">Rec</span></button>
     <span class="tag rec" id="recInfo"></span>
@@ -179,6 +184,25 @@
             <button type="button" data-via="ble">Bluetooth</button>
             <button type="button" data-via="serial">Cavo</button>
           </span>
+        </div>
+        <!-- E da quale ingresso entra la voce. Stessa forma della riga sopra — la
+             chiave è «Microfono», il nome dell'interruttore che sta due
+             centimetri più in là — ma una tendina invece di un controllo a
+             scatti: gli ingressi sono N e si chiamano «Scarlett Solo USB», non
+             stanno in due caselle affiancate.
+
+             Serve perché la scelta fatta nel prompt del permesso il browser se
+             la ricorda PER QUESTO SITO e la mette davanti al predefinito di
+             sistema: senza questa riga, cambiare microfono vuol dire trovare il
+             lucchetto nella barra degli indirizzi.
+
+             Parte nascosta e la mostra `ui/microfoni.js` quando c'è davvero
+             qualcosa da scegliere: con un ingresso solo — e finché il permesso
+             non è stato dato, perché prima i dispositivi non hanno un nome — non
+             è una scelta. -->
+        <div class="menu-r rigamic" id="rigaMic" hidden>
+          <span class="menu-k">Microfono</span>
+          <select class="selmic" id="selMic" aria-label="microfono"></select>
         </div>
         <!-- L'unico comando che esiste in tutti e due i modi, e l'unica via fra
              loro. Dice DOVE PORTA, non dove sei: un interruttore etichettato col

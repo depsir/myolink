@@ -625,6 +625,13 @@ body[data-fase=registrando] .rack { border-color: #66302b; background: linear-gr
 .seg button:hover:not(:disabled) { background: #1b222c; color: var(--fg); border: 0; border-left: 1px solid var(--line); }
 .seg button:first-child:hover:not(:disabled) { border-left: 0; }
 .seg button[aria-pressed=true] { background: #1f6feb; color: #fff; }
+/* La tendina del microfono. Un `max-width` e non una larghezza: i nomi dei
+   dispositivi vanno da «Microfono» a «Scarlett Solo USB (0d8c:0014)» e il
+   pannellino del menu è largo 236 px — senza questo, una voce lunga lo allarga
+   fino al bordo dello schermo. Il troncamento con i puntini lo fa il browser. */
+.menu-r select { max-width: 172px; font-size: 12px; }
+header .rigamic select { max-width: 190px; }
+
 /* La via all'avanzato: una riga piena in fondo al menu, separata da quello che
    sta sopra — cambia schermata, non è un'opzione della schermata. */
 .modo.mi {

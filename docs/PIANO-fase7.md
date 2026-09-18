@@ -695,3 +695,107 @@ caricamento — cioè un telefono: la riga è `hidden` e alta 0 px. E *Attiva il
 sensore*, in tutti e due i casi, va dritto al trasporto scelto: nessun pannello
 di domanda in pagina, e l'errore che compare sotto l'interruttore è quello del
 Bluetooth. Più i 190 test dei moduli, che questo giro non tocca.
+
+## 7l — Da quale microfono entra la voce
+
+> «è possibile far selezionare in qualche modo da quale microfono prende
+> l'audio? quando chiede il permesso del microfono posso selezionarlo ma poi non
+> posso più. non so nemmeno se abbia senso o se chiedere il default del sistema
+> operativo.. e non saprei come metterlo facilmente nelle opzioni della versione
+> semplificata.. che dici?»
+
+Il dubbio dentro la domanda — *ha senso, o basta il default del sistema?* — ha
+una risposta netta, e non è quella che sembra. **Il default del sistema non
+basta**, perché il browser non lo guarda: la scelta fatta nel prompt del permesso
+viene ricordata *per quel sito* e si mette davanti al predefinito di sistema.
+Cambiare microfono nelle impostazioni del Mac non sposta niente; per cambiarlo
+davvero bisogna aprire il lucchetto nella barra degli indirizzi. È un posto che
+chi canta non troverà mai, ed è esattamente il «poi non posso più» della domanda.
+
+Quindi la stessa forma della 7k, e per la stessa ragione: **un default e
+un'opzione, non una domanda**. Il predefinito di sistema resta il predefinito;
+chi ha un'interfaccia audio attaccata lo dice una volta sotto la rotellina.
+
+```
+Finestra   [ 3 s ][ 5 s ][ 10 s ][ 30 s ]
+Sensore    [ Bluetooth ][ Cavo ]
+Microfono  [ Predefinito del sistema  ▾ ]
+```
+
+Una tendina e non le caselle a scatti della riga sopra: lì le opzioni sono due e
+si leggono tutte, qui sono N e si chiamano «Scarlett Solo USB». La riga sparisce
+con meno di due ingressi — stessa regola di *Sensore* — **e anche finché il
+permesso non è stato dato**, perché prima di quello i dispositivi non hanno un
+nome, e una tendina di tre voci vuote non è una scelta. I due casi sono uno solo
+per chi guarda, e infatti sono una riga sola di codice.
+
+In avanzato la rotellina non esiste, e la stessa tendina sta accanto al pulsante
+*Microfono*: un comando, due posti, scritti da una `querySelectorAll` sola, come
+l'interruttore dei modi.
+
+**Mentre si registra non si tocca.** Cambiare dispositivo vuol dire riaprire il
+flusso, e quella traccia è già dentro un file che si sta scrivendo. Il `disabled`
+lo dice, ma a renderlo vero è il controllo sulla fase dentro l'handler: il CSS
+spiega, non impedisce.
+
+### `ideal` era il modo educato di non fare niente
+
+Il vincolo era partito come `deviceId: {ideal: …}`, per prudenza: un'interfaccia
+staccata non deve impedire l'apertura. Ed è stato **il difetto**, trovato dal
+committente sull'hardware vero: *«ho scelto il mixer esterno che ha il gain a
+zero ma riceve ancora, penso dal microfono del mac»*.
+
+`ideal` è un desiderio, e il browser lo scavalca proprio con la cosa da cui
+questo comando esiste per scappare: il dispositivo ricordato per il sito. Il
+vincolo partiva — `getConstraints()` lo mostrava — e continuava a entrare il
+microfono di prima.
+
+Il banco di prova l'aveva detto e l'avevo letto male: con `ideal` la traccia viva
+si dichiarava `deviceId: "default"` invece del dispositivo chiesto, e l'avevo
+preso per un limite del device finto di Chrome headless. Con `exact` la stessa
+lettura torna l'id giusto. **Era il vincolo a non essere applicato, non la misura
+a essere cieca** — ed è la seconda volta in questa fase che una misura del banco
+viene archiviata come artefatto dello strumento invece che come il difetto che
+era.
+
+La prudenza non sta nel chiedere piano: sta nel **ripiego esplicito**. Con
+`exact`, un dispositivo assente fa lanciare `OverconstrainedError` invece di
+aprirne un altro in silenzio; l'app riapre dal predefinito e lo dice, nel
+registro e sotto l'interruttore — dove il modo semplice può vederlo.
+
+### Il fantasma, cioè la preferenza che non si cancella da sé
+
+Restava una contraddizione mia: il ripiego prometteva che «il mixer può tornare
+fra dieci minuti», ma la tendina, appena quel dispositivo spariva dall'elenco,
+**dimenticava la preferenza in silenzio**. Era il rimedio sbagliato a un problema
+vero — una preferenza fuori elenco non si può mostrare senza mentire — e
+contraddiceva la regola scritta sei righe sopra nella 7k: *un'impostazione che si
+cambia da sola è un'impostazione rotta*.
+
+La preferenza adesso porta con sé **il nome** con cui il dispositivo è stato
+visto l'ultima volta. Un `deviceId` è 64 caratteri esadecimali e da staccato non
+dice niente; col nome, la tendina tiene una voce spenta — «Scarlett Solo USB (non
+collegato)» — e le tre cose tornano coerenti: la scelta si vede, sopravvive allo
+scollegamento, e l'unico modo di perderla è sceglierne un'altra. La riga resta
+visibile anche quando i dispositivi veri sono tornati uno solo: due voci di cui
+una spenta sono la spiegazione di cosa sta succedendo.
+
+A microfono acceso la tendina dice invece **cosa sta entrando**, e lo sa in due
+modi perché uno solo non basta: il browser nomina un dispositivo diverso da
+quello chiesto, *oppure* non nomina niente ma la preferenza è il fantasma — e
+allora è certo che non è lui a suonare, senza bisogno che nessuno lo dichiari.
+
+### Verificato come
+
+Chrome headless via CDP sul dev server, due scenari. Col percorso normale: la
+riga è nascosta prima del permesso e compare dopo, scegliere la seconda voce
+riapre il flusso con `getConstraints().deviceId` uguale alla scelta e
+`MIC.aperto` uguale a `MIC.scelto`, le due tendine restano allineate, la
+registrazione la spegne, e la preferenza sopravvive a un ricaricamento. Con una
+preferenza che punta a un dispositivo mai esistito: `OverconstrainedError`,
+ripiego sul predefinito, il messaggio nel registro **e** nel riquadro sotto
+l'interruttore, la voce spenta in fondo alla tendina, e la tendina che passa a
+«Predefinito del sistema» mentre l'audio entra davvero. Zero eccezioni in
+console. Più 205 test dei moduli, sei dei quali nuovi: alias di Chrome esclusi
+dall'elenco, etichette vuote che valgono «nessuna scelta possibile», `exact` e
+non `ideal`, e il nome che viaggia con l'id.

@@ -11,6 +11,7 @@
 import { spec, pitch, T } from "../core/state.js";
 import { P, PITCH_FFT, PITCH_HOP, setupYin, yin } from "./pitch.js";
 import { micAttach, micDetach } from "./bus.js";
+import { MIC, micAperto, micChiuso, vincoloMic } from "./microfoni.js";
 import { TP, tapeClose, tapeOpen } from "./tape.js";
 import { logFail, micPermission, segnala, MIC_HINT } from "../core/diagnostics.js";
 import { resize } from "../draw/canvas.js";
@@ -45,12 +46,11 @@ export async function toggleAudio() {
                    MIC_HINT.NotAllowedError);
   }
   try {
-    // I filtri pensati per le chiamate vocali sono l'opposto di ciò che serve
-    // qui: la soppressione del rumore buca lo spettro, il guadagno automatico
-    // rende il livello non confrontabile nel tempo.
-    A.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
-    });
+    A.stream = await apriFlusso();
+    // Cosa è entrato DAVVERO. Con `exact` è quasi sempre quello che abbiamo
+    // chiesto, ma non tutti i browser nominano il dispositivo aperto e dopo un
+    // ripiego non è più quello: chi mostra la tendina guarda qui.
+    micAperto(A.stream);
     A.ctx = new AudioContext();
     await A.ctx.resume();
     A.sampleRate = A.ctx.sampleRate;
@@ -99,6 +99,34 @@ export async function toggleAudio() {
   }
 }
 
+// I filtri pensati per le chiamate vocali sono l'opposto di ciò che serve qui: la
+// soppressione del rumore buca lo spettro, il guadagno automatico rende il
+// livello non confrontabile nel tempo. Il vincolo del dispositivo sta davanti a
+// loro, e per chi non ha mai scelto niente `vincoloMic()` è un oggetto vuoto: la
+// richiesta resta quella di sempre.
+//
+// Il ripiego è il prezzo di `exact` ed è anche il motivo per cui si può usare
+// `exact`: se il dispositivo scelto non c'è più — interfaccia staccata, USB in
+// un'altra porta — il browser lancia OverconstrainedError invece di aprire
+// qualcos'altro, e qui si riapre dal predefinito **dicendolo**. La preferenza
+// non si tocca: quel mixer può tornare fra dieci minuti, e chi guarda la tendina
+// vede comunque il dispositivo vivo, non quello chiesto.
+async function apriFlusso() {
+  const filtri = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: { ...vincoloMic(), ...filtri } });
+  } catch (e) {
+    if (!MIC.scelto || e?.name !== "OverconstrainedError") throw e;
+    log("microfono: il dispositivo scelto non è disponibile, apro il predefinito.");
+    // Anche sotto l'interruttore, non solo nel registro: nel modo semplice il
+    // registro non c'è, e questa è esattamente la notizia che spiega perché si
+    // sente il microfono sbagliato.
+    segnala("microfono", "il dispositivo scelto non è disponibile: apro il predefinito.",
+            "Riattaccalo e riapri il microfono, oppure scegline un altro dalla tendina.");
+    return await navigator.mediaDevices.getUserMedia({ audio: filtri });
+  }
+}
+
 function releaseAudio() {
   // Solo la cattura: il nastro già acquisito resta riascoltabile, come il
   // pannello che resta visibile.
@@ -108,6 +136,7 @@ function releaseAudio() {
   // Prima di fermare le tracce: la registrazione in corso torna a registrare
   // silenzio, invece di trascinarsi dietro un nodo su una traccia morta.
   micDetach();
+  micChiuso();
   try { A.stream?.getTracks().forEach((t) => t.stop()); } catch {}
   try { A.ctx?.close(); } catch {}
   A.ctx = A.stream = A.src = A.analyser = A.pAn = null;
@@ -121,6 +150,19 @@ export function closeAudio(reason) {
   setLabel($("btnAudio"), "Microfono", "Mic");
   $("btnAudio").classList.remove("danger");
   log("microfono chiuso" + (reason && reason !== "manuale" ? " (" + reason + ")" : ""));
+}
+
+// Cambiare microfono vuol dire riaprire il flusso: il dispositivo di un
+// MediaStreamTrack non si sostituisce a caldo. Ci si rimette il nastro del
+// riascolto, che `tapeOpen` ricomincia da capo — lo spettrogramma no, la sua
+// storia resta finché non cambia la FFT. La riapertura la chiede la UI, che è
+// anche chi si assicura che non succeda mentre si registra: lì la traccia nel
+// bus è già dentro un file che si sta scrivendo.
+export async function riapriAudio() {
+  if (!A.on) return;
+  closeAudio("cambio microfono");
+  log("il nastro del riascolto riparte da qui.");
+  await toggleAudio();
 }
 
 // fftSize decide il compromesso classico: Δf = fs/N contro finestra N/fs.

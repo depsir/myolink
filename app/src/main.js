@@ -14,6 +14,7 @@ import { connectSerial } from "./transport/serial.js";
 import { connectBle } from "./transport/ble.js";
 import { connectDemo } from "./transport/sim.js";
 import { A, applyFft, toggleAudio } from "./audio/audio.js";
+import { MIC } from "./audio/microfoni.js";
 import { TP } from "./audio/tape.js";
 import { P } from "./audio/pitch.js";
 import { PAD, resize, cssW, cssH, pitW, pitH, specW, specH } from "./draw/canvas.js";
@@ -29,6 +30,7 @@ import { FT, setupFatica, tickFatica } from "./ui/fatica.js";
 import { F } from "./core/fase.js";
 import { MODO, setupModo, tracce } from "./ui/modo.js";
 import { setupRack, tickRack } from "./ui/rack.js";
+import { setupMicUI } from "./ui/microfoni.js";
 import { setupRiquadro, tickRiquadro } from "./ui/riquadro.js";
 import { $, log } from "./ui/dom.js";
 
@@ -85,6 +87,9 @@ setupMarks();
 setupFatica();
 setupRiquadro();
 setupRack();
+// Dopo la rastrelliera: la tendina del microfono vive in due posti e uno dei due
+// è dentro il menu che `setupRack()` sistema.
+setupMicUI();
 
 $("btnSerial").onclick = connectSerial;
 $("btnBle").onclick = connectBle;
@@ -131,6 +136,10 @@ window.MyoLink = {
   // sta guardando, e senza di loro un controllo su "il comando giusto è in
   // vista" dovrebbe dedurlo dal CSS.
   F, MODO,
+  // Quale microfono è stato chiesto e quale sta entrando davvero: dal banco di
+  // prova è il modo di controllare che il vincolo sia arrivato al browser,
+  // senza andare a leggere il localStorage.
+  MIC,
   // Quali delle tre letture del grafico del sensore sono accese: dal banco di
   // prova è il modo di controllare che la legenda e il disegno dicano la stessa
   // cosa, senza andare a leggere il localStorage.

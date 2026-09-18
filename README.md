@@ -52,7 +52,13 @@ Si apre in **modo semplice**, che è quello con cui si canta: due interruttori �
 grafici. Il sensore entra **via Bluetooth e non lo chiede**: chi lo tiene col
 cavo lo dice una volta sotto la rotellina (*Sensore → Bluetooth / Cavo*), e
 l'opzione compare solo dove il cavo è possibile — sul telefono Web Serial non
-esiste e la riga non c'è. Gli ingressi sono uno stato permanente e la registrazione è un'azione
+esiste e la riga non c'è. Sotto c'è **da quale ingresso entra la voce**
+(*Microfono → Predefinito del sistema / …*), che serve perché la scelta fatta nel
+prompt del permesso il browser se la ricorda per quel sito e la mette davanti al
+predefinito di sistema: senza quella riga, cambiare microfono vorrebbe dire
+trovare il lucchetto nella barra degli indirizzi. Compare solo quando c'è
+davvero qualcosa da scegliere — almeno due ingressi, e il permesso già dato,
+perché prima i dispositivi non hanno un nome. Gli ingressi sono uno stato permanente e la registrazione è un'azione
 sopra di essi: se registri, registri tutto quello che è acceso, e ogni ingresso
 incluso porta il suo pallino rosso. Ci sono **due fasi e non cinque stati**: *dal
 vivo* (o *registrando*, che è la stessa vista più il tempo) e *la presa*, dove
@@ -121,7 +127,19 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 
 **Microfono.** Il pulsante *Microfono* apre i due pannelli audio, pitch e
 spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
-viceversa.
+viceversa. La tendina accanto sceglie **l'ingresso** ed è la stessa del menu del
+modo semplice: il dispositivo si chiede come `deviceId: {exact: …}`, perché
+`{ideal: …}` è un desiderio e il browser lo scavalca col dispositivo che si è
+ricordato per il sito — cioè la sorgente non cambia, che è l'unica cosa che
+serve. Se quel dispositivo non c'è più il browser lancia `OverconstrainedError`
+invece di aprirne un altro in silenzio, e l'app riapre dal predefinito
+dicendolo. La preferenza si ricorda **col nome** del dispositivo, e non si
+cancella da sé quando lo stacchi: la tendina tiene una voce spenta — *«Scarlett
+Solo USB (non collegato)»* — così la scelta si vede, sopravvive, e riattaccando
+l'interfaccia torna buona da sé. **Non si cambia mentre si registra**:
+il dispositivo di una traccia non si sostituisce a caldo, e quella traccia è già
+dentro un file che si sta scrivendo. Cambiandolo dal vivo il flusso si riapre, e
+il nastro del riascolto (non lo spettrogramma) riparte da lì.
 
 **Registrare.** *Registra* salva un `.mp4` unico con gli strati spuntati sotto
 ⚙ (`video: sforzo e nota / sensore / pitch / spettro`) e l'audio del microfono.

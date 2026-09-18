@@ -31,7 +31,7 @@
 // revisione il tempo lo dice la striscia, che è dove lo si sta cercando.
 
 import { store } from "../core/state.js";
-import { ROSSO, VERDE, ZERO_MIN } from "../core/fatica.js";
+import { ROSSO, SCALA, VERDE, ZERO_MIN } from "../core/fatica.js";
 import { A } from "../audio/audio.js";
 import { P, noteName } from "../audio/pitch.js";
 import { pThr } from "../draw/pitch.js";
@@ -39,12 +39,6 @@ import { FT } from "./fatica.js";
 import { cursore, hasPitch } from "./marks.js";
 import { semplice } from "./modo.js";
 import { $ } from "./dom.js";
-
-// La scala dell'indicatore, in count sopra il riposo: 0-90. Il verde finisce a
-// un terzo, il giallo poco oltre i due terzi, e sopra c'è il rosso — cioè le
-// proporzioni che il gradiente della barra disegna, e che quindi non vanno
-// tenute allineate a mano fra CSS e JavaScript se non in questo numero.
-const SCALA = 90;
 
 const DICE = {
   verde: "Sforzo normale",
@@ -65,38 +59,55 @@ export function setupRiquadro() {
     `+${VERDE}, il rosso comincia a +${ROSSO}.`;
 }
 
+// Che cosa dice il riquadro, adesso. È una funzione a parte — e non il corpo di
+// `tickRiquadro` — perché ADESSO LO LEGGONO IN DUE: il riquadro a schermo, che
+// scrive queste stesse quattro cose nel DOM, e la banda del video, che le
+// disegna in un canvas. Divergendo, il file mostrerebbe un numero e lo schermo
+// un altro; consegnando invece le stringhe già fatte, la sola differenza fra i
+// due resta come sono dipinte.
+//
+// `notaBox` è "c'è una sorgente di pitch", non "in questo decimo di secondo la
+// stima è buona": col microfono aperto (o su una presa che ha il suo pitch) il
+// posto della nota resta e si svuota nelle pause. Altrimenti il riquadro si
+// allargherebbe e si stringerebbe a ogni frase, che è la cosa che si nota al
+// posto della misura.
+export function lettura() {
+  // In riascolto si dice il valore SOTTO IL CURSORE e non l'ultimo arrivato:
+  // altrimenti si mostrerebbe un istante diverso da quello che i grafici stanno
+  // disegnando, ed è esattamente la contraddizione che rende inutile un riquadro
+  // di riepilogo.
+  const c = cursore();
+  const val = c ? c.val : FT.val;
+  const z = c ? c.zona : FT.zona;
+  const nota = c ? c.m : (A.on && P.c >= pThr() ? P.m : NaN);
+  return {
+    z, val, nota,
+    say: z ? DICE[z] : attesaTesto(),
+    num: z ? (val >= 0 ? "+" : "") + val.toFixed(0) : store.n ? attesa() + " s" : "—",
+    notaBox: A.on || hasPitch(),
+    // La frazione dell'indicatore, 0…1, con l'ago appoggiato al bordo destro
+    // quando la misura esce dalla scala: fuori scala non vuol dire "non so".
+    f: Math.min(1, Math.max(0, (isFinite(val) ? val : 0) / SCALA)),
+  };
+}
+
 export function tickRiquadro() {
   if (!el || !semplice()) return;
   const now = performance.now();
   if (now - t0 < T_TICK) return;
   t0 = now;
 
-  // In riascolto il riquadro dice il valore SOTTO IL CURSORE e non l'ultimo
-  // arrivato: altrimenti mostrerebbe un istante diverso da quello che i grafici
-  // stanno disegnando, ed è esattamente la contraddizione che rende inutile un
-  // riquadro di riepilogo.
-  const c = cursore();
-  const val = c ? c.val : FT.val;
-  const z = c ? c.zona : FT.zona;
-  const nota = c ? c.m : (A.on && P.c >= pThr() ? P.m : NaN);
+  const L = lettura();
+  scrivi("riqSay", L.say);
+  scrivi("riqVal", L.num);
 
-  scrivi("riqSay", z ? DICE[z] : attesaTesto());
-  scrivi("riqVal", z ? (val >= 0 ? "+" : "") + val.toFixed(0)
-                     : store.n ? attesa() + " s" : "—");
-
-  // La nota c'è o non c'è a seconda che ci sia una SORGENTE, non a seconda che
-  // in questo decimo di secondo la stima sia buona: col microfono aperto (o su
-  // una presa che ha il suo pitch) il riquadro tiene il posto e lo lascia
-  // vuoto nelle pause. Altrimenti si allargherebbe e si stringerebbe a ogni
-  // frase, che è la cosa che si nota al posto della misura.
   const nb = $("riqNotaBox");
-  nb.hidden = !(A.on || hasPitch());
-  nb.classList.toggle("vuota", !isFinite(nota));
-  scrivi("riqNota", isFinite(nota) ? noteName(nota) : "–");
+  nb.hidden = !L.notaBox;
+  nb.classList.toggle("vuota", !isFinite(L.nota));
+  scrivi("riqNota", isFinite(L.nota) ? noteName(L.nota) : "–");
 
-  if (el.dataset.z !== (z || "")) el.dataset.z = z || "";
-  const f = Math.min(1, Math.max(0, (isFinite(val) ? val : 0) / SCALA));
-  $("riqNow").style.left = (f * 100).toFixed(1) + "%";
+  if (el.dataset.z !== (L.z || "")) el.dataset.z = L.z || "";
+  $("riqNow").style.left = (L.f * 100).toFixed(1) + "%";
 }
 
 function scrivi(id, txt) {

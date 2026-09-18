@@ -72,6 +72,15 @@ export const WIN = 2;
 // seconda sessione, misurando; finché non c'è, restano in count e si dice.
 export const VERDE = 30, ROSSO = 55;
 
+// Il fondo scala dell'indicatore orizzontale, in count sopra il riposo. Non è
+// una soglia — la misura non si ferma a 90 — è il pezzo di scala che si disegna:
+// il verde arriva a un terzo, il rosso comincia poco oltre i due terzi, e da lì
+// in su l'ago sta appoggiato al bordo destro. Sta qui e non nel riquadro perché
+// adesso lo stesso indicatore lo disegnano in due (il riquadro col CSS, la banda
+// del video col canvas), e una scala diversa fra schermo e file renderebbe il
+// video una misura di un'altra cosa.
+export const SCALA = 90;
+
 export const ZONE = [
   {
     key: "verde", label: "verde", col: "#3fb950",

@@ -20,6 +20,7 @@
 import { T, pitch, store } from "../core/state.js";
 import { busLive, closeBus, openBus } from "../audio/bus.js";
 import { cv, dpr, pitCv, specCv } from "../draw/canvas.js";
+import { apriBanda, chiudiBanda, pittaBanda } from "./banda.js";
 import { composeLayout } from "./layout.js";
 import {
   countInRange, emgCsv, extFor, pitchCsv, stamp, supportedMimes, videoBitrate,
@@ -37,6 +38,17 @@ const LAYERS = [
   { key: "pitch", cv: pitCv, box: "recPitch" },
   { key: "spec", cv: specCv, box: "recSpec" },
 ];
+
+// La banda dello sforzo non è in questa lista: gli altri strati sono canvas che
+// esistono già sulla pagina, lei va dipinta apposta (vedi banda.js) e nasce
+// all'avvio della registrazione. Va SOPRA i tre, dov'è a schermo, e quindi chi
+// non la vuole se la toglie con un crop invece di dover tagliare in mezzo.
+//
+// La sua larghezza è quella dei pannelli: uguale per costruzione fra i tre (è
+// quella che tiene allineati gli assi dei tempi), e un pannello nascosto misura
+// 0, quindi il massimo è la larghezza vera. Se non ce n'è nessuno visibile non
+// c'è niente da registrare comunque, e composeLayout lo dice.
+const bandaW = () => Math.max(cv.width, pitCv.width, specCv.width);
 
 // `t0` e `t1` sopravvivono alla fine della registrazione, e servono: sono
 // l'ancora fra il tempo del grafico e quello del video, cioè quello che permette
@@ -79,8 +91,15 @@ export async function toggleRecord() {
   // composeLayout lo scarta.
   const layers = LAYERS.filter((l) => $(l.box).checked)
     .map((l) => ({ key: l.key, w: l.cv.width, h: l.cv.height }));
+  // La banda si apre PRIMA della composizione perché la sua altezza dipende
+  // dalla larghezza, e la larghezza è quella dei pannelli: è uno strato come gli
+  // altri, solo che il suo canvas lo crea lei.
+  const bw = bandaW();
+  const banda = $("recBanda").checked && bw ? apriBanda(bw, dpr) : null;
+  if (banda) layers.unshift({ key: "banda", w: banda.width, h: banda.height });
   const L = composeLayout(layers, GAP);
   if (!L.rects.length) {
+    chiudiBanda();
     return log("registrazione: nessuno strato da includere — spunta un pannello visibile.");
   }
 
@@ -106,7 +125,10 @@ export async function toggleRecord() {
   // accendere il microfono a vuoto quando non c'è niente da negoziare; la scelta
   // vera avviene dopo, provando a costruire (vedi buildRecorder).
   const mimes = supportedMimes((t) => MediaRecorder.isTypeSupported(t));
-  if (!mimes.length) return log("registrazione: nessun formato supportato dal browser.");
+  if (!mimes.length) {
+    chiudiBanda();
+    return log("registrazione: nessun formato supportato dal browser.");
+  }
 
   // La traccia audio è sempre quella del bus, mai quella del microfono: il bus
   // esiste per tutta la registrazione e il microfono si aggancia al suo grafo
@@ -129,6 +151,7 @@ export async function toggleRecord() {
   const { rec, mime, err } = buildRecorder(new MediaStream(tracks), mimes, vbr);
   if (!rec) {
     closeBus();
+    chiudiBanda();
     return log("registrazione: " + (err?.name || "errore") + " — " + (err?.message || mimes[0]));
   }
 
@@ -139,7 +162,7 @@ export async function toggleRecord() {
     // Il valore vero si legge alla chiusura — vedi save().
     rec, mime, chunks: [], bytes: 0, t0: performance.now(), t1: 0,
     out, cx, rects: L.rects,
-    src: Object.fromEntries(LAYERS.map((l) => [l.key, l.cv])),
+    src: { ...Object.fromEntries(LAYERS.map((l) => [l.key, l.cv])), banda },
   });
 
   rec.ondataavailable = (e) => {
@@ -205,6 +228,10 @@ export function drawComposite() {
   if (!R.cx) return;
   // Il cronometro qui: è il posto che gira a ogni fotogramma finché si registra.
   showInfo();
+  // La banda prima di tutto: è l'unico strato che non è già disegnato quando si
+  // arriva qui. Gli altri tre sono i canvas della pagina, e il ciclo di disegno
+  // li ha appena finiti.
+  if (R.src?.banda) pittaBanda();
   R.cx.fillStyle = BG;
   R.cx.fillRect(0, 0, R.out.width, R.out.height);
   for (const r of R.rects) {
@@ -247,6 +274,7 @@ function save() {
   closeBus();
 
   R.rec = null; R.chunks = []; R.cx = R.out = null; R.rects = [];
+  chiudiBanda(); R.src = null;
   setLabel($("btnRec"), "Registra", "Rec");
   $("btnRec").classList.remove("danger");
   $("recInfo").textContent = ""; shown = "";

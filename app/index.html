@@ -70,6 +70,10 @@
     <div class="sep"></div>
     <!-- Quali pannelli finiscono nel video: decidono anche quanto è alto il file. -->
     <span class="tag">video</span>
+    <!-- La banda dello sforzo sta in cima al fotogramma, dov'è a schermo: dice il
+         valore ISTANTANEO, che sui grafici si deve leggere sull'asse. Chi non la
+         vuole se la toglie con un crop, che è il motivo per cui sta in cima. -->
+    <label><input type="checkbox" id="recBanda" checked title="la barra dello sforzo e della nota, in cima al fotogramma"> sforzo e nota</label>
     <label><input type="checkbox" id="recEmg" checked> sensore</label>
     <label><input type="checkbox" id="recPitch" checked> pitch</label>
     <label><input type="checkbox" id="recSpec" checked> spettro</label>

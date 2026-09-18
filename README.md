@@ -123,14 +123,33 @@ riflashare — comodo per cercare il punto di rottura del BLE.
 spettrogramma. È un flusso indipendente: funziona anche senza board collegata, e
 viceversa.
 
-**Registrare.** *Registra* salva un `.mp4` unico con i pannelli spuntati sotto
-⚙ (`video: sensore / pitch / spettro`) e l'audio del microfono. Un canvas fuori
-schermo riceve a ogni fotogramma i tre canvas impilati, `captureStream` lo
-trasforma in traccia video, e nello **stesso** `MediaStream` entra la traccia
-audio: la sincronia audio/video la garantisce il registratore, che timbra le due
-tracce con lo stesso orologio, e non c'è niente da allineare a mano. L'`offset`
-audio agisce sul disegno, quindi finisce dentro il video da sé — il file mostra
-esattamente quello che si vedeva a schermo.
+**Registrare.** *Registra* salva un `.mp4` unico con gli strati spuntati sotto
+⚙ (`video: sforzo e nota / sensore / pitch / spettro`) e l'audio del microfono.
+Un canvas fuori schermo riceve a ogni fotogramma i canvas impilati,
+`captureStream` lo trasforma in traccia video, e nello **stesso** `MediaStream`
+entra la traccia audio: la sincronia audio/video la garantisce il registratore,
+che timbra le due tracce con lo stesso orologio, e non c'è niente da allineare a
+mano. L'`offset` audio agisce sul disegno, quindi finisce dentro il video da sé
+— il file mostra esattamente quello che si vedeva a schermo.
+
+**La banda dello sforzo** (`src/record/banda.js`) è il quarto strato ed è
+l'unico che non è un canvas della pagina: il riquadro — parola, numero, nota e
+indicatore — ridisegnato apposta per il file. Serve perché i tre grafici
+raccontano il tempo, e il valore *istantaneo* lì si deve leggere sull'asse:
+riguardando la presa la banda lo dice in cifre, fotogramma per fotogramma. Sta
+in **cima**, dov'è a schermo, e quindi chi non la vuole se la toglie con una
+passata di crop invece di dover tagliare in mezzo.
+
+Non ricalcola niente: chiama `lettura()` di `ui/riquadro.js`, cioè la stessa
+funzione che scrive nel DOM — se le due divergessero, il video sarebbe la misura
+di un'altra cosa e nessuno se ne accorgerebbe fino a mettere il file accanto allo
+schermo. Per la stessa ragione le tinte delle zone sono variabili CSS
+(`--zbg-verde` e compagnia) lette da `getComputedStyle`, e le fermate della pista
+si ricavano da `VERDE`/`ROSSO`/`SCALA` invece di essere due percentuali scritte a
+mano nel canvas. Le misure (altezza, corpi dei caratteri, posto fisso di tre
+caratteri per la nota) stanno in `record/layout.js` con quelle
+dell'impaginazione, e per lo stesso motivo: una banda storta si vede solo
+riguardando il file, quindi è una funzione pura coperta dai test.
 
 **L'ordine dei due pulsanti non conta.** La traccia audio del file non è quella
 del microfono: è quella di un *bus* (`src/audio/bus.js`) che vive per tutta la
@@ -935,6 +954,14 @@ Verificato:
     ammazza. È la ragione per cui il formato di uscita è mp4;
   - un fotogramma estratto a metà contiene davvero i tre pannelli impilati, con
     la tastiera del pitch, la targhetta della nota e le colonne di spettro;
+  - la **banda dello sforzo** in cima al fotogramma, larga quanto i pannelli
+    (94 px su un video da 1254, 64 su uno da 482): parola, numero e ago nel
+    colore della zona, le tre fasce della pista a tinta piatta con i confini
+    esattamente su +30 e +55, e la nota che compare — `A3` con un oscillatore a
+    220 Hz — e lascia il suo posto vuoto quando non c'è segnale. Col microfono
+    chiuso spariscono nota e riga divisoria e il numero va a filo destro; in
+    *avanzato*, dove il riquadro a schermo non c'è, la banda si registra lo
+    stesso, perché è una scelta sul file e non sul modo;
   - comprimere un pannello **a registrazione avviata** non cambia la geometria
     del file e non solleva eccezioni; chiudere il **microfono** a registrazione
     avviata non ferma il video e non perde l'audio già raccolto;

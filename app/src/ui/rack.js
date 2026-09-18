@@ -42,16 +42,16 @@ const KEY = "myolink.trasporto";
 
 const RK = {
   collega: false,         // fra il clic e la risposta del browser
-  chiede: false,          // la scelta Bluetooth/cavo è aperta
   conferma: false,        // la domanda prima di perdere una presa non salvata
 };
 
 // ---- i trasporti che ESISTONO su questo browser ----
 //
-// Web Serial non c'è su Android e non c'è su Safari: lì la domanda non si pone e
-// non si fa. Era il difetto peggiore della vecchia riga di comandi — *Collega
-// seriale* primo e blu, cioè il primo tocco di un non tecnico da telefono era
-// quello che non poteva funzionare.
+// Web Serial non c'è su Android e non c'è su Safari: lì il cavo non è
+// un'opzione, ed è la ragione per cui questa lista esiste. Era il difetto
+// peggiore della vecchia riga di comandi — *Collega seriale* primo e blu, cioè
+// il primo tocco di un non tecnico da telefono era quello che non poteva
+// funzionare.
 function trasporti() {
   const out = [];
   if (navigator.bluetooth) out.push("ble");
@@ -61,7 +61,27 @@ function trasporti() {
 
 const ricorda = (k) => { try { localStorage.setItem(KEY, k); } catch {} };
 const ricordato = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
-const scorda = () => { try { localStorage.removeItem(KEY); } catch {} };
+
+// ---- per dove passa il sensore ----
+//
+// **Il Bluetooth è la via, e non si chiede.** Prima era una domanda
+// all'accensione — «Come è collegato il sensore?» con due pulsanti — chiesta la
+// prima volta e poi ricordata: un passo in più per tutti per un'informazione che
+// quasi tutti hanno uguale, e per giunta chiesta nel momento peggiore, quando
+// uno ha appena toccato *Attiva il sensore* e si aspetta che si accenda.
+//
+// Chi lavora col cavo lo dice una volta sotto la rotellina, e da lì in poi
+// l'accensione è un tocco solo per tutti e due. La preferenza non si scorda più
+// da sé quando un collegamento fallisce: prima era il rimedio a una scelta presa
+// di fretta e senza poterla rivedere, adesso è un'impostazione, e un'impostazione
+// che si cambia da sola è un'impostazione rotta — l'errore dice cos'è successo,
+// e cambiarla è a due tocchi.
+function via() {
+  const t = trasporti();
+  const r = ricordato();
+  if (r && t.includes(r)) return r;
+  return t.includes("ble") ? "ble" : (t[0] || null);
+}
 
 export function setupRack() {
   $("swSens").onclick = sensore;
@@ -70,10 +90,6 @@ export function setupRack() {
 
   $("btnPresa").onclick = () => { errore(null); toggleRecord(); };
   $("btnVivo").onclick = tornaAlVivo;
-
-  $("scBle").onclick = () => vai("ble");
-  $("scSer").onclick = () => vai("serial");
-  $("scX").onclick = () => { RK.chiede = false; sync(); };
 
   $("cfSave").onclick = () => { saveRecording(); vivo(); };
   $("cfDrop").onclick = vivo;
@@ -89,6 +105,7 @@ export function setupRack() {
   setFailSink(errore);
   chiudiFuori($("menuBox"));
   finestra();
+  collegamento();
   sync();
 }
 
@@ -108,6 +125,38 @@ function finestra() {
   // Se il valore lo cambia l'altro modo, il menu lo sa: è lo stesso campo, e due
   // comandi sulla stessa cosa che dicono numeri diversi sono un comando rotto.
   $("win").addEventListener("input", pitta);
+  pitta();
+}
+
+// ---- e per dove passa il sensore ----
+//
+// Le due caselle sono lo stesso controllo a scatti della finestra: qui dicono
+// tutte e due le vie, che è la ragione per cui non è un interruttore — un
+// interruttore ha una etichetta sola e l'altro stato si indovina. La chiave è
+// «Sensore», il nome dell'interruttore che sta fuori: la riga è un'opzione di
+// quella cosa lì, non un argomento nuovo.
+//
+// La via che questo browser non sa fare non compare — è la stessa regola della
+// vecchia domanda, che su Android non si faceva: un'opzione che non può
+// funzionare è solo un modo di far sbagliare. E quando ne resta una sola sparisce
+// la riga intera: un controllo a scatti con uno scatto solo non è una scelta, è
+// una decorazione, e sul telefono — dove il cavo non esiste mai — il menu
+// tornerebbe pieno di roba che non si può toccare. Chi non ha nemmeno il
+// Bluetooth (iPhone, Safari) lo scopre dall'errore quando accende, che è il
+// momento in cui la cosa gli serve.
+//
+// Nessuna `hidden` sui pulsanti, solo sulla riga: sono i due soli trasporti che
+// esistono, quindi «meno di due disponibili» vuol già dire «non c'è niente da
+// scegliere».
+function collegamento() {
+  const seg = document.querySelectorAll("#segVia button");
+  const t = trasporti();
+  $("rigaVia").hidden = t.length < 2;
+  const pitta = () => {
+    const v = via();
+    for (const b of seg) b.setAttribute("aria-pressed", String(b.dataset.via === v));
+  };
+  for (const b of seg) b.onclick = () => { errore(null); ricorda(b.dataset.via); pitta(); };
   pitta();
 }
 
@@ -136,23 +185,18 @@ async function sensore() {
   errore(null);
   if (S.running) return stop("manuale");
   if (RK.collega) return;
-  const t = trasporti();
-  if (!t.length) {
+  const v = via();
+  if (!v) {
     return errore("sensore", "questo browser non sa collegare il sensore.",
       "Servono Chrome o Edge: su computer vanno bene sia il Bluetooth sia il cavo, " +
       "su Android solo il Bluetooth. Su iPhone e su Safari non è disponibile.");
   }
-  if (t.length === 1) return vai(t[0]);
-  // Chiesto una volta sola: la risposta si ricorda, e si scorda da sé se quella
-  // via fallisce — così nessuno resta chiuso fuori da una scelta di ieri.
-  const r = ricordato();
-  if (r && t.includes(r)) return vai(r);
-  RK.chiede = true;
-  sync();
+  // Un tocco solo, sempre: la via è quella delle impostazioni — Bluetooth, se
+  // nessuno ha detto altro — e non c'è più niente da rispondere qui.
+  return vai(v);
 }
 
 async function vai(kind) {
-  RK.chiede = false;
   RK.collega = true;
   sync();
   try {
@@ -160,7 +204,6 @@ async function vai(kind) {
   } finally {
     RK.collega = false;
   }
-  if (S.running) ricorda(kind); else scorda();
   sync();
 }
 
@@ -246,7 +289,6 @@ function sync() {
   interruttore("swMic", mic);
   scrivi("sensSt", RK.collega ? "sto collegando…" : "");
 
-  $("rack").classList.toggle("chiede", RK.chiede);
   $("rack").classList.toggle("conferma-on", RK.conferma);
 
   const rec = F.now === "registrando";

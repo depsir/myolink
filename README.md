@@ -49,7 +49,10 @@ col simulatore.
 
 Si apre in **modo semplice**, che è quello con cui si canta: due interruttori —
 *Sensore* e *Microfono* — un riquadro che dice quanto stai spingendo, e i
-grafici. Gli ingressi sono uno stato permanente e la registrazione è un'azione
+grafici. Il sensore entra **via Bluetooth e non lo chiede**: chi lo tiene col
+cavo lo dice una volta sotto la rotellina (*Sensore → Bluetooth / Cavo*), e
+l'opzione compare solo dove il cavo è possibile — sul telefono Web Serial non
+esiste e la riga non c'è. Gli ingressi sono uno stato permanente e la registrazione è un'azione
 sopra di essi: se registri, registri tutto quello che è acceso, e ogni ingresso
 incluso porta il suo pallino rosso. Ci sono **due fasi e non cinque stati**: *dal
 vivo* (o *registrando*, che è la stessa vista più il tempo) e *la presa*, dove

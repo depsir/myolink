@@ -152,6 +152,30 @@
             <button type="button" data-w="30">30 s</button>
           </span>
         </div>
+        <!-- Per dove passa il sensore. Era una domanda all'accensione — «Come è
+             collegato il sensore?», due pulsanti, chiesta una volta e poi
+             ricordata — e la chiedeva a chi non ha niente da scegliere: il
+             Bluetooth è la via normale, il cavo è il caso di chi sta al banco
+             col computer. Quindi un default e un'opzione, non una domanda: si
+             accende il sensore e basta, e chi ha il cavo viene qui una volta.
+
+             La chiave è «Sensore» e non «Collegamento»: è il nome
+             dell'interruttore che sta fuori dal menu, a due centimetri da qui, e
+             così la riga si legge come un'opzione DI QUELLA COSA invece che come
+             un argomento nuovo di cui scoprire il significato.
+
+             A scatti come la finestra, e non un interruttore: un toggle qui
+             porta una sola etichetta e lascia l'altro stato da indovinare —
+             «Bluetooth» spento non vuol dire «cavo», non vuol dire niente. Due
+             caselle affiancate dicono tutte e due le vie e quale è attiva, nello
+             stesso spazio di un interruttore. -->
+        <div class="menu-r" id="rigaVia">
+          <span class="menu-k">Sensore</span>
+          <span class="seg" id="segVia">
+            <button type="button" data-via="ble">Bluetooth</button>
+            <button type="button" data-via="serial">Cavo</button>
+          </span>
+        </div>
         <!-- L'unico comando che esiste in tutti e due i modi, e l'unica via fra
              loro. Dice DOVE PORTA, non dove sei: un interruttore etichettato col
              proprio stato si legge al contrario metà delle volte. -->
@@ -159,17 +183,6 @@
       </div>
     </details>
     </span>
-
-    <!-- Chiesto una volta sola, e solo se il browser sa fare tutti e due: sul
-         telefono Web Serial non esiste e non si chiede niente. Oggi invece
-         "Collega seriale" era il primo pulsante ed era pure blu — su Android il
-         primo tocco di un non tecnico era quello sbagliato. -->
-    <div class="scelta" id="scelta">
-      <span>Come è collegato il sensore?</span>
-      <button class="big" id="scBle">Bluetooth</button>
-      <button id="scSer">Col cavo</button>
-      <button class="x" id="scX" aria-label="annulla">&times;</button>
-    </div>
 
     <!-- L'errore sotto il comando che l'ha causato, non in fondo alla pagina. -->
     <div class="rkerr" id="rackErr"></div>
@@ -389,6 +402,8 @@
       Web Serial, Web Bluetooth e il microfono richiedono un contesto sicuro: <code>https</code> oppure
       <code>http://localhost</code> — non <code>file://</code>. In locale: <code>npm run dev</code>.
       Serial: Chrome/Edge su desktop. BLE: Chrome/Edge su desktop e Android.
+      Nel semplice il sensore entra via Bluetooth senza chiedere niente, e il cavo si sceglie sotto la
+      rotellina (<em>Sensore → Bluetooth / Cavo</em>), dove il browser lo permette.
       Se qualcosa non parte, la prima riga del log dice quali API ci sono e in che stato è il permesso del
       microfono; quando una richiesta fallisce, sotto l'errore compare dove guardare.
       <code>offset audio</code> compensa la latenza di acquisizione audio, che il browser non espone:

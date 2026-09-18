@@ -548,15 +548,14 @@ body[data-fase=presa] .rec-btn { display: none; }
 body:not([data-fase=presa]) .torna { display: none; }
 body[data-fase=registrando] .rack { border-color: #66302b; background: linear-gradient(180deg, #2a1413, var(--panel) 60%); }
 
-.scelta, .conferma {
+.conferma {
   display: none; flex: 0 0 100%; gap: 9px; align-items: center; flex-wrap: wrap;
   border-top: 1px solid var(--line); margin-top: 2px; padding-top: 9px;
 }
-.rack.chiede .scelta, .rack.conferma-on .conferma { display: flex; }
+.rack.conferma-on .conferma { display: flex; }
 .rack.conferma-on { border-color: #5c4516; }
 .conferma p { margin: 0; font-size: 13px; flex: 1 1 22ch; min-width: 0; }
 .conferma b { color: var(--warn); }
-.scelta .x { margin-left: auto; background: none; border: 0; color: var(--dim); font-size: 18px; padding: 2px 8px; }
 
 /* L'errore sotto il comando che l'ha causato. Le istruzioni sono quelle di
    core/diagnostics.js, che erano già scritte bene e finivano solo nel log. */
@@ -599,9 +598,15 @@ body[data-fase=registrando] .rack { border-color: #66302b; background: linear-gr
   padding: 10px; box-shadow: 0 14px 34px #000a;
 }
 .menu-r { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* `display: flex` qui sopra vince sul `display: none` che il browser dà a
+   [hidden]: senza questa riga la riga del collegamento resterebbe a schermo
+   anche dove non c'è niente da scegliere. */
+.menu-r[hidden] { display: none; }
 .menu-k { color: var(--dim); font-size: 12px; }
-/* A scatti e non una casella numerica: i valori che servono cantando sono
-   quattro, e in mezzo a una canzone non si compila un campo. */
+/* A scatti, e sono le due opzioni del menu: la finestra perché i valori che
+   servono cantando sono quattro e in mezzo a una canzone non si compila un
+   campo, il collegamento perché le vie sono due e vanno lette tutte e due —
+   un interruttore ne avrebbe scritta una sola. */
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
 .seg button {
   border: 0; border-radius: 0; background: none; color: var(--dim);
@@ -726,7 +731,7 @@ body[data-fase=registrando] .rack { border-color: #66302b; background: linear-gr
   .rack-sp { display: none; }
   .fase { grid-column: 1 / -1; grid-row: 2; }
   .fase .rec-btn, .fase .torna { flex: 1 1 auto; justify-content: center; }
-  .scelta, .conferma, .rkerr { grid-column: 1 / -1; }
+  .conferma, .rkerr { grid-column: 1 / -1; }
   .sem { padding: 11px 13px 13px; }
   /* Su 390 px il numero, la parola e la nota ci stanno per una decina di pixel:
      senza stringere il passo e la nota, la nota andava a capo da sola e lasciava

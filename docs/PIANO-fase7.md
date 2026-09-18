@@ -182,7 +182,7 @@ stato: tutto il resto è vestizione.
 |---|---|---|---|
 | **7a** | **La fase come stato** | Un modulo che possiede `fase = vivo \| registrando \| presa`, derivata da ciò che già esiste, e a cui si agganciano comandi e pannelli tramite `body[data-fase]`. Niente DOM dentro: chi vuole vederla si iscrive. | `app/src/core/fase.js` |
 | **7b** | **L'interruttore semplice/avanzato** | `body[data-modo]`, ricordato in `localStorage`. Il semplice è il default. | `app/src/ui/modo.js` |
-| **7c** | **Gli ingressi** | Due interruttori al posto di sei pulsanti; la scelta Bluetooth/cavo chiesta una volta sola e ricordata (e **scordata da sé se quella via fallisce**, così nessuno resta chiuso fuori da una scelta di ieri); i trasporti che il browser non ha non compaiono; gli errori di `core/diagnostics.js` sotto il comando che li ha causati. Simulatore e Calibra sono in avanzato. | `app/src/ui/rack.js`, `core/diagnostics.js` |
+| **7c** | **Gli ingressi** | Due interruttori al posto di sei pulsanti; la scelta Bluetooth/cavo chiesta una volta sola e ricordata (e **scordata da sé se quella via fallisce**, così nessuno resta chiuso fuori da una scelta di ieri — nella **7k** la domanda diventa un'impostazione e questa riga se ne va con lei); i trasporti che il browser non ha non compaiono; gli errori di `core/diagnostics.js` sotto il comando che li ha causati. Simulatore e Calibra sono in avanzato. | `app/src/ui/rack.js`, `core/diagnostics.js` |
 | **7d** | **Il riquadro** | Parola di significato, numero, nota, indicatore. In riascolto legge il **valore sotto il cursore**, non l'ultimo arrivato. Il messaggio d'attesa dei primi venti secondi è fuori dalla `i`. | `app/src/ui/riquadro.js` |
 | **7e** | **La fase «la presa»** | La scheda con salvata/non salvata, la striscia come navigazione, i grafici fermi coi tempi della presa, *Torna al vivo* con la domanda. Riusa `ui/marks.js` quasi per intero: l'analisi parte da sé allo stop. | `app/src/ui/marks.js`, `record/recorder.js` |
 | **7f** | **Il grafico in scala di fatica** | Zero = riposo, fondo scala +90, le tre zone come campitura, la sola linea dello sforzo. L'asse dei tempi porta due parole (`−5 s` / `adesso`) invece di sette numeri negativi. | `app/src/draw/chart.js` |
@@ -619,3 +619,79 @@ arriva in fondo, e nessun errore in console. Più i 190 test dei moduli senza DO
 Lo stato vuoto ha una passata sua, desktop e telefono: l'altezza di ogni figlio
 di `main` letta una per una, che è il modo in cui il grafico di troppo si è fatto
 trovare — 501 px di pannello sotto un invito che ne occupava 256.
+
+## 7k — La domanda che non andava fatta
+
+> «vorrei che l'opzione del collegamento bluetooth vs seriale non fosse più alla
+> attivazione del sensore ma fosse nei settings. quindi di base è bluetooth,
+> senza chiedere nulla, ma dalla dropdown delle opzioni puoi switchare a via
+> cavo. non so che controllo sia giusto in quel caso, perché pensavo a un toggle
+> ma in realtà non saprei dove mettere le label di bluetooth vs via cavo.. prova
+> a ragionare su un controllo compatto»
+
+La 7c aveva già tolto il difetto peggiore — *Collega seriale* primo e blu, cioè
+il primo tocco di un non tecnico da telefono era quello che non poteva
+funzionare — ma aveva tenuto la domanda: *«Come è collegato il sensore?»*, due
+pulsanti, chiesta la prima volta e ricordata. Chiesta a tutti, per
+un'informazione che quasi tutti hanno uguale, e **nel momento peggiore**: uno ha
+appena premuto *Attiva il sensore* e si aspetta che si accenda, non che gli si
+apra un questionario.
+
+È la differenza fra una **domanda** e un'**impostazione**. Una domanda vale
+quando le risposte sono equiprobabili; qui non lo sono — il Bluetooth è la via
+normale, il cavo è il caso di chi sta al banco col computer. Quindi un default e
+un'opzione: si accende il sensore e basta, e chi lavora col cavo lo dice una
+volta sotto la rotellina. Da lì in poi l'accensione è **un tocco solo per tutti e
+due**, che la domanda non otteneva per nessuno dei due.
+
+### Il controllo: perché non è un interruttore
+
+La domanda del committente conteneva già la risposta («non saprei dove mettere le
+label»). Un interruttore ha **una etichetta sola**, e l'altro stato si indovina:
+«Bluetooth» spento non vuol dire «cavo», non vuol dire niente. Vale anche per il
+suo parente, l'etichetta doppia ai due lati — che risolve il nome ma non dice più
+quale dei due è acceso, perché l'unico segnale rimasto è da che parte sta il
+pallino.
+
+Il menu però aveva già il controllo giusto, costruito nella 7j per la finestra: le
+caselle a scatti. Due caselle affiancate dicono **tutte e due le vie e quale è
+attiva**, nello stesso spazio di un interruttore, e sono lo stesso idioma della
+riga che sta sopra — cioè una cosa in meno da imparare, non una in più.
+
+```
+Finestra   [ 3 s ][ 5 s ][ 10 s ][ 30 s ]
+Sensore    [ Bluetooth ][ Cavo ]
+Avanzato
+```
+
+La chiave della riga è **«Sensore»** e non «Collegamento», ed è la seconda
+correzione del committente: *«così c'è il rimando a fuori»*. «Sensore» è il nome
+dell'interruttore che sta a due centimetri da lì, fuori dal menu; la riga si legge
+come un'opzione **di quella cosa**, invece che come un argomento nuovo di cui
+scoprire il significato. «Collegamento» era corretto e non rimandava a niente.
+
+### Due conseguenze, e una regola che cambia segno
+
+**La via che il browser non sa fare non compare.** È la stessa regola di prima —
+su Android la domanda non si faceva — applicata al posto nuovo. E quando ne resta
+una sola sparisce la riga intera: un controllo a scatti con uno scatto solo non è
+una scelta, è una decorazione. Sul telefono, dove il cavo non esiste mai, il menu
+resta quello di prima.
+
+**La preferenza non si scorda più da sé se il collegamento fallisce.** Quella
+riga della 7c era il rimedio giusto a una scelta presa di fretta e senza poterla
+rivedere: se ti si rompeva la via scelta ieri, restavi chiuso fuori. Adesso la
+scelta è visibile e si cambia in due tocchi — e un'impostazione che si cambia da
+sola è un'impostazione rotta. L'errore sotto l'interruttore continua a dire cos'è
+successo, che è l'altra metà del perché quella riga può andarsene.
+
+### Verificato come
+
+Chrome headless via CDP sul dev server, tre controlli. Col browser che ha tutti e
+due i trasporti: la riga c'è nel menu, il Bluetooth è premuto senza che nessuno
+abbia scelto niente, e un clic su *Cavo* sposta il premuto e scrive
+`myolink.trasporto`. Con `Navigator.prototype.serial` cancellato prima del
+caricamento — cioè un telefono: la riga è `hidden` e alta 0 px. E *Attiva il
+sensore*, in tutti e due i casi, va dritto al trasporto scelto: nessun pannello
+di domanda in pagina, e l'errore che compare sotto l'interruttore è quello del
+Bluetooth. Più i 190 test dei moduli, che questo giro non tocca.
